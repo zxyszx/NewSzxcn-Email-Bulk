@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPOSITORY="zxyszx/NewSzxcn-Email"
-RAW_BASE="https://raw.githubusercontent.com/${REPOSITORY}/main"
+REPOSITORY="szx/NewSzxcn-Email-Bulk"
+GITEA_BASE="https://gitea.xzys.me/${REPOSITORY}"
+RAW_BASE="${GITEA_BASE}/raw/branch/main"
+SOURCE_ARCHIVE="${GITEA_BASE}/archive/main.tar.gz"
 INSTALL_DIR="${LANQIN_INSTALL_DIR:-/opt/newszxcn-email}"
 COMMAND="${1:-menu}"
 ROLLBACK_FILE="${INSTALL_DIR}/.rollback-image"
 ROLLBACK_POINTER="${INSTALL_DIR}/.rollback-manifest"
 RUNTIME_IMAGE_PIN="${INSTALL_DIR}/.rollback-runtime-image"
+SOURCE_DIR="${INSTALL_DIR}/source"
+SOURCE_COMPOSE="${INSTALL_DIR}/docker-compose.source.yml"
 NGINX_CONFIG="/etc/nginx/conf.d/newszxcn-email.conf"
 ACME_WEBROOT="/var/www/newszxcn-acme"
 CERT_DIR="${INSTALL_DIR}/certs"
@@ -79,14 +83,18 @@ ensure_docker() {
 }
 
 compose() {
-  local runtime_image=""
+  local runtime_image="" compose_args
+  compose_args=(--project-directory "${INSTALL_DIR}" -f "${INSTALL_DIR}/docker-compose.yml")
+  if [[ -d "${SOURCE_DIR}" && -f "${SOURCE_COMPOSE}" && ! -s "${RUNTIME_IMAGE_PIN}" ]]; then
+    compose_args+=(-f "${SOURCE_COMPOSE}")
+  fi
   if [[ -s "${RUNTIME_IMAGE_PIN}" ]]; then
     runtime_image="$(tr -d '\r\n' < "${RUNTIME_IMAGE_PIN}")"
   fi
   if [[ -n "${runtime_image}" ]]; then
-    LANQIN_IMAGE="${runtime_image}" docker compose --project-directory "${INSTALL_DIR}" -f "${INSTALL_DIR}/docker-compose.yml" "$@"
+    LANQIN_IMAGE="${runtime_image}" docker compose "${compose_args[@]}" "$@"
   else
-    docker compose --project-directory "${INSTALL_DIR}" -f "${INSTALL_DIR}/docker-compose.yml" "$@"
+    docker compose "${compose_args[@]}" "$@"
   fi
 }
 
@@ -100,22 +108,25 @@ script_dir() {
 
 stage_assets() {
   local source_dir local_source="false"
-  local compose_new env_example_new installer_new
+  local compose_new source_compose_new env_example_new installer_new
   source_dir="$(script_dir || true)"
   if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != /dev/fd/* ]]; then
     local_source="true"
   fi
   install -d -m 0755 "${INSTALL_DIR}"
   compose_new="${INSTALL_DIR}/.docker-compose.yml.new"
+  source_compose_new="${INSTALL_DIR}/.docker-compose.source.yml.new"
   env_example_new="${INSTALL_DIR}/.env.example.new"
   installer_new="${INSTALL_DIR}/.install.sh.new"
-  rm -f "${compose_new}" "${env_example_new}" "${installer_new}"
-  if [[ "${local_source}" == "true" && -f "${source_dir}/deploy/docker-compose.yml" && -f "${source_dir}/deploy/.env.example" ]]; then
+  rm -f "${compose_new}" "${source_compose_new}" "${env_example_new}" "${installer_new}"
+  if [[ "${local_source}" == "true" && -f "${source_dir}/deploy/docker-compose.yml" && -f "${source_dir}/deploy/docker-compose.source.yml" && -f "${source_dir}/deploy/.env.example" ]]; then
     install -m 0644 "${source_dir}/deploy/docker-compose.yml" "${compose_new}"
+    install -m 0644 "${source_dir}/deploy/docker-compose.source.yml" "${source_compose_new}"
     install -m 0644 "${source_dir}/deploy/.env.example" "${env_example_new}"
     install -m 0755 "${source_dir}/install.sh" "${installer_new}"
   else
     curl -fsSL "${RAW_BASE}/deploy/docker-compose.yml" -o "${compose_new}"
+    curl -fsSL "${RAW_BASE}/deploy/docker-compose.source.yml" -o "${source_compose_new}"
     curl -fsSL "${RAW_BASE}/deploy/.env.example" -o "${env_example_new}"
     curl -fsSL "${RAW_BASE}/install.sh" -o "${installer_new}"
   fi
@@ -132,10 +143,43 @@ stage_assets() {
 
 apply_staged_assets() {
   install -m 0644 "${INSTALL_DIR}/.docker-compose.yml.new" "${INSTALL_DIR}/docker-compose.yml" || return 1
+  install -m 0644 "${INSTALL_DIR}/.docker-compose.source.yml.new" "${SOURCE_COMPOSE}" || return 1
   install -m 0644 "${INSTALL_DIR}/.env.example.new" "${INSTALL_DIR}/.env.example" || return 1
   install -m 0755 "${INSTALL_DIR}/.install.sh.new" "${CLI_PATH}.new" || return 1
   mv "${CLI_PATH}.new" "${CLI_PATH}" || return 1
-  rm -f "${INSTALL_DIR}/.docker-compose.yml.new" "${INSTALL_DIR}/.env.example.new" "${INSTALL_DIR}/.install.sh.new"
+  rm -f "${INSTALL_DIR}/.docker-compose.yml.new" "${INSTALL_DIR}/.docker-compose.source.yml.new" "${INSTALL_DIR}/.env.example.new" "${INSTALL_DIR}/.install.sh.new"
+}
+
+prepare_source_build() {
+  local archive staging extracted
+  archive="$(mktemp)"
+  staging="$(mktemp -d)"
+  log "容器镜像暂不可用，正在下载群发版源码作为备用安装方式..."
+  if ! curl -fsSL "${SOURCE_ARCHIVE}" -o "${archive}" || ! tar -xzf "${archive}" -C "${staging}"; then
+    rm -f "${archive}"
+    rm -rf "${staging}"
+    return 1
+  fi
+  rm -f "${archive}"
+  extracted="$(find "${staging}" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+  if [[ -z "${extracted}" || ! -f "${extracted}/deploy/all-in-one/Dockerfile" || ! -f "${extracted}/apps/api/go.mod" || ! -f "${extracted}/apps/web/package.json" ]]; then
+    rm -rf "${staging}"
+    return 1
+  fi
+  rm -rf "${SOURCE_DIR}"
+  mv "${extracted}" "${SOURCE_DIR}"
+  rm -rf "${staging}"
+  log "正在本机编译 NewSzxcn Email 群发版，首次安装需要几分钟..."
+  compose build --pull lanqin-email
+}
+
+prepare_runtime() {
+  if compose pull; then
+    rm -rf "${SOURCE_DIR}"
+    return 0
+  fi
+  warn "未能拉取群发版容器镜像，将自动改用源码构建。"
+  prepare_source_build
 }
 
 ensure_cli_alias() {
@@ -851,7 +895,7 @@ current_image_id() {
     return
   fi
   image_ref="$(env_value LANQIN_IMAGE || true)"
-  image_ref="${image_ref:-ghcr.io/zxyszx/newszxcn-email:latest}"
+  image_ref="${image_ref:-gitea.xzys.me/szx/newszxcn-email-bulk:latest}"
   docker image inspect --format '{{.Id}}' "${image_ref}" 2>/dev/null
 }
 
@@ -1035,7 +1079,7 @@ do_repair_install() {
     fail "修复环境准备失败，原配置和数据未删除。"
   fi
   log "正在拉取并修复 NewSzxcn Email 服务..."
-  if ! compose pull; then
+  if ! prepare_runtime; then
     if [[ "${snapshot_created}" == "true" ]]; then
       restore_update_snapshot "" false || true
       fail "修复镜像拉取失败，已恢复原安装。"
@@ -1086,7 +1130,7 @@ do_install() {
   configure_firewall
   prepare_directories
   log "正在拉取 NewSzxcn Email 镜像..."
-  compose pull
+  prepare_runtime
   log "正在启动服务..."
   compose up -d --remove-orphans
   wait_for_health 90 || fail "服务未能通过健康检查，请执行 newszxcn-email logs 查看日志。"
@@ -1336,9 +1380,9 @@ do_restore_backup() {
     configure_firewall
     prepare_directories
     log "正在拉取恢复所需的 NewSzxcn Email 镜像..."
-    compose pull
+    prepare_runtime
     image_ref="$(env_value LANQIN_IMAGE || true)"
-    image_ref="${image_ref:-ghcr.io/zxyszx/newszxcn-email:latest}"
+    image_ref="${image_ref:-gitea.xzys.me/szx/newszxcn-email-bulk:latest}"
     image="$(docker image inspect --format '{{.Id}}' "${image_ref}" 2>/dev/null || true)"
     [[ -n "${image}" ]] || fail "无法检查恢复数据库：镜像不存在。"
     sqlite_integrity_check "${INSTALL_DIR}/data/lanqin.db" "${image}" || fail "备份数据库完整性检查未通过，服务未启动。"
@@ -1379,7 +1423,7 @@ do_update() {
     fail "更新文件替换失败，已恢复原安装。"
   fi
   log "正在拉取最新版..."
-  if ! compose pull; then
+  if ! prepare_runtime; then
     restore_update_snapshot "" false || true
     fail "镜像拉取失败，已恢复到更新前版本。"
   fi
@@ -1524,7 +1568,7 @@ SSL 证书：有效期至 ${certificate_expiry}
 重置管理员密码：newszxcn-email reset-password
 
 公开教程：
-https://github.com/zxyszx/NewSzxcn-Email/blob/main/docs/GUIDE.md
+https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/src/branch/main/docs/GUIDE.md
 EOF
   install -m 0600 "${tmp}" "${GUIDE_FILE}"
   rm -f "${tmp}"

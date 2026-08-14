@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ForwardingSettings, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, SystemVersion, SystemUpdateResult, BackupList, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken, TwoFactorEnableResponse, BulkMoveResult, TelegramPrivateChat, TelegramPairing } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ForwardingSettings, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, SystemVersion, SystemUpdateResult, BackupList, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken, TwoFactorEnableResponse, BulkMoveResult, TelegramPrivateChat, TelegramPairing, Campaign, CampaignInput, CampaignSuppression } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -209,6 +209,18 @@ export const api = {
     const suffix = query.toString()
     return request<ListResponse<SendQueueAuditEvent>>(`/api/admin/send-audit${suffix ? `?${suffix}` : ""}`)
   },
+  campaigns: () => request<ListResponse<Campaign>>("/api/admin/campaigns"),
+  campaign: (id: string) => request<Campaign>(`/api/admin/campaigns/${id}`),
+  createCampaign: (payload: CampaignInput) => request<Campaign>("/api/admin/campaigns", { method: "POST", body: JSON.stringify(payload), timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
+  updateCampaign: (id: string, payload: CampaignInput) => request<Campaign>(`/api/admin/campaigns/${id}`, { method: "POST", body: JSON.stringify(payload), timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
+  startCampaign: (id: string) => request<Campaign>(`/api/admin/campaigns/${id}/start`, { method: "POST" }),
+  pauseCampaign: (id: string) => request<Campaign>(`/api/admin/campaigns/${id}/pause`, { method: "POST" }),
+  resumeCampaign: (id: string) => request<Campaign>(`/api/admin/campaigns/${id}/resume`, { method: "POST" }),
+  cancelCampaign: (id: string) => request<Campaign>(`/api/admin/campaigns/${id}/cancel`, { method: "POST" }),
+  retryCampaignRecipients: (id: string, recipientIds: string[]) => request<{ retried: number; campaign: Campaign }>(`/api/admin/campaigns/${id}/retry-failed`, { method: "POST", body: JSON.stringify({ recipientIds }) }),
+  campaignSuppressions: () => request<ListResponse<CampaignSuppression>>("/api/admin/campaign-suppressions"),
+  createCampaignSuppression: (payload: { email: string; reason: string }) => request<CampaignSuppression>("/api/admin/campaign-suppressions", { method: "POST", body: JSON.stringify(payload) }),
+  deleteCampaignSuppression: (id: string) => request<{ ok: boolean }>(`/api/admin/campaign-suppressions/${id}`, { method: "DELETE" }),
   systemVersion: () => request<SystemVersion>("/api/admin/system/version"),
   updateSystem: () => request<SystemUpdateResult>("/api/admin/system/update", { method: "POST", timeoutMs: 45_000 }),
   backups: () => request<BackupList>("/api/admin/backups"),

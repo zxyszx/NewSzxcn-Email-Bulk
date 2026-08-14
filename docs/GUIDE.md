@@ -7,7 +7,7 @@
 建议使用 Debian 或 Ubuntu，并提前准备一个已经解析到服务器的邮件主机名，例如 `mail.example.com`。
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email/main/install.sh)
+bash <(curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh)
 ```
 
 安装脚本会依次询问防火墙配置和邮件服务器域名，自动检测邮箱地址域名，再让你选择默认 `admin` 前缀或自定义管理员邮箱前缀，最后输入密码并选择 Web 部署方式。例如输入服务器域名 `mail.newszxcn.com`，确认检测结果 `@newszxcn.com`，选择 `1. 使用默认前缀 admin` 会创建 `admin@newszxcn.com`；选择 `2. 自定义管理员邮箱前缀` 后才需要输入邮箱账号前缀。选择“自动配置 Nginx + SSL”时，脚本会安装 Nginx，并使用官方 `acme.sh` 申请 Let's Encrypt 证书。
@@ -75,7 +75,7 @@ DNS 生效通常需要几分钟到数小时。系统只能检测记录，不能�
 
 Telegram 连接失败不会影响邮局收件。系统会保留通知任务并自动重试；关闭通知、更换机器人、更换私聊账号或修改通知邮箱范围时，尚未发送的旧任务会被清除。Telegram Bot API 不提供客户端幂等键，因此网络超时发生在 Telegram 已收到请求但服务器未收到响应时，极少数通知可能重复发送。Bot Token 不会在设置页面重新显示；以后修改其他设置时，Token 输入框留空即可保留原值。
 
-邮件通知机器人只负责部署实例的私聊提醒。项目版本频道通知由 GitHub Release 工作流统一发送，不需要在每台服务器重复配置。
+邮件通知机器人只负责部署实例的私聊提醒。项目版本频道通知由版本发布流程统一发送，不需要在每台服务器重复配置。
 
 ## SSL 证书与自动续期
 
@@ -170,4 +170,4 @@ sudo newszxcn-email reset-2fa
 - [项目说明](../README.md)
 - [Docker 部署说明](../deploy/README.md)
 - [API 文档](API.md)
-- [版本发布](https://github.com/zxyszx/NewSzxcn-Email/releases)
+- [版本发布](https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/releases)

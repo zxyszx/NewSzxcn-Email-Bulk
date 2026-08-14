@@ -1,12 +1,13 @@
-# NewSzxcn Email
+# NewSzxcn Email Bulk
 
-NewSzxcn Email is a self-hosted mail server with a complete Webmail client and administration console. It bundles Go, React, Postfix, Dovecot, Rspamd, and SQLite into an all-in-one Docker deployment.
+NewSzxcn Email Bulk is a separate consent-based campaign edition of NewSzxcn Email. It preserves the complete Webmail and administration console while adding multi-sender distribution, recipient import, rate limits, scheduling, unsubscribe handling, and per-recipient delivery tracking.
 
-[Releases](https://github.com/zxyszx/NewSzxcn-Email/releases) · [Chinese README](README.md)
+[Releases](https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/releases) · [Chinese README](README.md)
 
 ## Features
 
 - Webmail with compose, drafts, attachments, search, labels, folders, reminders, import, and export
+- Consent-based campaigns with CSV import, even multi-sender allocation, rate limiting, scheduling, pause/resume, suppression lists, and failed-recipient retry
 - Multiple domains and mailboxes, DKIM, DNS checks, verified forwarding, and external IMAP
 - Incoming mail rules with conditions, ordering, forwarding, moving, and bulk application
 - Administration for users, permission quotas, domains, mailboxes, messages, and send queues
@@ -18,7 +19,7 @@ NewSzxcn Email is a self-hosted mail server with a complete Webmail client and a
 Debian and Ubuntu on `amd64` or `arm64` are supported.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email/main/install.sh | sudo bash
+curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh | sudo bash
 ```
 
 The installer configures `/opt/newszxcn-email`, starts the Docker services, and waits for the health check. DNS records and provider port restrictions must still be configured by the operator.
@@ -55,8 +56,8 @@ Open TCP ports `25`, `80`, `443`, `465`, `587`, `993`, and `995` as needed. Publ
 ## Manual source deployment
 
 ```bash
-git clone https://github.com/zxyszx/NewSzxcn-Email.git
-cd NewSzxcn-Email/deploy
+git clone https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk.git
+cd NewSzxcn-Email-Bulk/deploy
 cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```

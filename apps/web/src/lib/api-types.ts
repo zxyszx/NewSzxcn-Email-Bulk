@@ -46,6 +46,8 @@ export type PermissionKey =
   | "admin.templates.view"
   | "admin.templates.update"
   | "admin.templates.reset"
+  | "admin.campaigns.view"
+  | "admin.campaigns.manage"
 export type PermissionInfo = { key: PermissionKey; label: string; description: string; category: string }
 export type PermissionLimits = { maxAttachmentMb: number; maxMailboxCount: number; smtpDailyLimit: number; smtpMinuteLimit: number; imapMinuteLimit: number; pop3MinuteLimit: number }
 export type PermissionGroupSummary = { id: string; name: string }
@@ -120,6 +122,17 @@ export type SendQueueAuditEvent = {
   attemptCount?: number
   createdAt: string
 }
+export type CampaignStatus = "draft" | "scheduled" | "running" | "paused" | "completed" | "canceled"
+export type CampaignRecipientStatus = "pending" | "queued" | "delivered" | "failed" | "suppressed" | "canceled"
+export type CampaignSender = { mailboxId: string; address: string; recipientCount: number }
+export type CampaignRecipient = { id: string; email: string; name?: string; mailboxId?: string; status: CampaignRecipientStatus; lastError?: string; queuedAt?: string; deliveredAt?: string }
+export type Campaign = {
+  id: string; mailboxId: string; mailboxAddress: string; senders?: CampaignSender[]; senderCount: number; name: string; subject: string; text?: string; html?: string; status: CampaignStatus; ratePerMinute: number; consentConfirmed: boolean
+  totalCount: number; pendingCount: number; queuedCount: number; deliveredCount: number; failedCount: number; suppressedCount: number
+  scheduledAt?: string; startedAt?: string; completedAt?: string; createdAt: string; updatedAt: string; recipients?: CampaignRecipient[]
+}
+export type CampaignInput = { mailboxId?: string; mailboxIds: string[]; name: string; subject: string; text: string; html: string; ratePerMinute: number; scheduledAt?: string; consentConfirmed: boolean; recipients: { email: string }[] }
+export type CampaignSuppression = { id: string; email: string; reason: string; source: string; campaignId?: string; createdAt: string; updatedAt: string }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
 export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }
 export type MailRuleConditionField = "from" | "to" | "cc" | "subject" | "body" | "attachment" | "size" | "date"

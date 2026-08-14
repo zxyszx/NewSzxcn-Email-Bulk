@@ -31,6 +31,7 @@ const (
 	sendSourceForwarding             = "forwarding"
 	sendSourceRuleForwarding         = "rule_forwarding"
 	sendSourceForwardingVerification = "forwarding_verification"
+	sendSourceCampaign               = "campaign"
 
 	sendQueueStaleAfter  = 15 * time.Minute
 	sendQueueConcurrency = 4

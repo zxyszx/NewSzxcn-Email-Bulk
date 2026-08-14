@@ -73,6 +73,9 @@ const (
 	PermissionTemplatesUpdate = "admin.templates.update"
 	PermissionTemplatesReset  = "admin.templates.reset"
 
+	PermissionCampaignsView   = "admin.campaigns.view"
+	PermissionCampaignsManage = "admin.campaigns.manage"
+
 	PermissionUsersManage     = PermissionUsersUpdate
 	PermissionGroupsManage    = PermissionGroupsUpdate
 	PermissionDomainsManage   = PermissionDomainsUpdate
@@ -347,6 +350,9 @@ var permissionCatalogItems = []PermissionInfo{
 	{Key: PermissionMessagesView, Label: "查看邮件列表", Description: "查看全局邮件列表和搜索结果。", Category: "邮件审计"},
 	{Key: PermissionMessagesRead, Label: "查看邮件正文", Description: "查看任意邮箱及未注册收件人的邮件正文。", Category: "邮件审计"},
 	{Key: PermissionMessagesAttachment, Label: "下载邮件附件", Description: "下载全局邮件中的附件。", Category: "邮件审计"},
+
+	{Key: PermissionCampaignsView, Label: "查看群发活动", Description: "查看群发活动、投递进度和退订名单。", Category: "群发活动"},
+	{Key: PermissionCampaignsManage, Label: "管理群发活动", Description: "创建、启动、暂停、取消群发活动并维护退订名单。", Category: "群发活动"},
 
 	{Key: PermissionSettingsView, Label: "查看系统设置", Description: "查看系统、SMTP、安全和邮件设置。", Category: "系统设置"},
 	{Key: PermissionSettingsUpdate, Label: "修改系统设置", Description: "保存系统、SMTP、安全和邮件设置。", Category: "系统设置"},

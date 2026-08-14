@@ -1,6 +1,6 @@
 services:
   lanqin-email:
-    image: ${LANQIN_IMAGE:-ghcr.io/zxyszx/newszxcn-email:latest}
+    image: ${LANQIN_IMAGE:-gitea.xzys.me/szx/newszxcn-email-bulk:latest}
     env_file: .env
     environment:
       LANQIN_UPDATE_SERVICE_URL: http://updater:8080/v1/update

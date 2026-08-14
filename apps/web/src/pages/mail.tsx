@@ -11,7 +11,7 @@ import TextAlign from "@tiptap/extension-text-align"
 import Placeholder from "@tiptap/extension-placeholder"
 import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
 import { useNavigate } from "react-router-dom"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Ban, Bell, Bold, Bot, Briefcase, Calendar, Check, ChevronDown, Clock3, Code2, Copy, Download, Ellipsis, Eraser, Eye, FileText, Folder, Forward, GraduationCap, Heart, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, Mailbox as MailboxIcon, MailCheck, MailQuestion, Moon, PanelLeftOpen, Paperclip, PencilLine, Plane, Plus, Quote, Receipt, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, ShoppingBag, Signature, SlidersHorizontal, Smile, Sparkles, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, Upload, Users, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Ban, Bell, Bold, Bot, Briefcase, Calendar, Check, ChevronDown, Clock3, Code2, Copy, Download, Ellipsis, Eraser, Eye, FileText, Folder, Forward, GraduationCap, Heart, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, Mailbox as MailboxIcon, MailCheck, MailQuestion, Maximize2, Megaphone, Minimize2, Moon, PanelLeftOpen, Paperclip, PencilLine, Plane, Plus, Quote, Receipt, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, ShoppingBag, Signature, SlidersHorizontal, Smile, Sparkles, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, Upload, Users, X } from "lucide-react"
 import { api, ExternalImapAccount, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, MailSearchParams, SendPayload, DraftPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, PermissionLimits } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
@@ -48,6 +48,7 @@ import { useMe } from "@/hooks/use-me"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useToast } from "@/hooks/use-toast"
 import { hasPermission } from "@/lib/permissions"
+import { CampaignsSection } from "@/pages/admin"
 
 const folderIcons: Record<string, React.ReactNode> = { inbox: <Inbox className="h-4 w-4" />, sent: <Send className="h-4 w-4" />, drafts: <FileText className="h-4 w-4" />, archive: <Archive className="h-4 w-4" />, spam: <Ban className="h-4 w-4" />, trash: <Trash2 className="h-4 w-4" /> }
 function NetflixFolderIcon({ className }: { className?: string }) {
@@ -120,7 +121,7 @@ const folderLabels: Record<string, string> = {
 
 type ComposeDraft = { key: string; id?: string; mailboxId?: string; to?: string; cc?: string; bcc?: string; subject?: string; text?: string; html?: string; files?: File[]; isDraft?: boolean }
 type MailFilter = "all" | "unread" | "starred" | "attachments" | "recent7"
-type MailView = "folder" | "starred" | "label" | "scheduled" | "sendQueue" | "external" | "unknown"
+type MailView = "folder" | "starred" | "label" | "scheduled" | "sendQueue" | "campaigns" | "external" | "unknown"
 type MailListResponse = { items?: MailMessage[]; nextCursor?: string }
 type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
@@ -249,6 +250,7 @@ export function MailPage() {
   const canManageLabels = hasPermission(user, "mail.labels.manage")
   const canDownloadAttachments = hasPermission(user, "mail.attachments.download")
   const canManageSignatures = hasPermission(user, "mail.signatures.manage")
+  const canViewCampaigns = hasPermission(user, "admin.campaigns.view")
   const canViewUnknownMail = user?.role === "admin"
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const externalImapEnabled = publicSettings.data?.externalImapEnabled ?? false
@@ -328,7 +330,7 @@ export function MailPage() {
     },
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
-    enabled: !!activeMailboxId && canReadMail && mailView !== "scheduled" && mailView !== "sendQueue" && mailView !== "unknown" && (mailView !== "label" || !!selectedLabelId),
+    enabled: !!activeMailboxId && canReadMail && mailView !== "scheduled" && mailView !== "sendQueue" && mailView !== "campaigns" && mailView !== "unknown" && (mailView !== "label" || !!selectedLabelId),
   })
   const unknownMessages = useInfiniteQuery({
     queryKey: ["admin", "unknown-messages", query],
@@ -757,7 +759,7 @@ export function MailPage() {
   const externalFolderItems = externalImapEnabled ? externalFolders.data?.items || [] : []
   const labelItems = labels.data?.items || []
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
-  const viewTitle = mailView === "external" ? `${selectedExternalAccount?.name || "外部邮箱"} · ${folderLabels[externalFolder] || externalFolder}` : mailView === "unknown" ? "未知收件" : mailView === "sendQueue" ? "发送队列" : mailView === "scheduled" ? "待发送" : mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder
+  const viewTitle = mailView === "campaigns" ? "群发活动" : mailView === "external" ? `${selectedExternalAccount?.name || "外部邮箱"} · ${folderLabels[externalFolder] || externalFolder}` : mailView === "unknown" ? "未知收件" : mailView === "sendQueue" ? "发送队列" : mailView === "scheduled" ? "待发送" : mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder
   const isTransferView = mailView === "folder" || mailView === "starred" || mailView === "label" || mailView === "unknown"
   const canExportCurrentView = canReadMail && isTransferView
   const canImportCurrentView = canOrganizeMail && isTransferView && mailView !== "unknown" && !!selectedMailbox
@@ -1352,6 +1354,12 @@ export function MailPage() {
             {!sidebarCollapsed && <span>写邮件</span>}
           </Button>
         )}
+        {canViewCampaigns && (
+          <Button type="button" variant={mailView === "campaigns" ? "secondary" : "outline"} className={cn("mt-2 h-9 w-full justify-start rounded-md text-[13px] font-medium shadow-none", sidebarCollapsed && "justify-center px-0")} size={sidebarCollapsed ? "icon" : "default"} onClick={() => { setMailView("campaigns"); setSelectedId(null); setMobileSidebarOpen(false) }}>
+            <Megaphone className="h-4 w-4" />
+            {!sidebarCollapsed && <span>群发活动</span>}
+          </Button>
+        )}
       </SidebarHeader>
       <SidebarContent className="min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain px-1 pb-4">
         {!sidebarCollapsed && publicSettings.isError && <SidebarQueryFailure label="邮箱设置读取失败" onRetry={() => { void publicSettings.refetch() }} />}
@@ -1647,6 +1655,8 @@ export function MailPage() {
     <MailQueryFailure error={mailboxList.error} onRetry={() => { void mailboxList.refetch() }} />
   ) : !mailboxList.isLoading && !hasMailboxes && mailView !== "unknown" ? (
     <NoMailboxState onManageMailboxes={() => navigate("/profile?tab=mailboxes")} />
+  ) : mailView === "campaigns" && canViewCampaigns ? (
+    <ScrollArea className="min-h-0 flex-1"><main className="mx-auto w-full max-w-[1320px] space-y-3 px-3 pb-8 pt-4 sm:px-5"><div className="border-b pb-3"><h1 className="text-xl font-semibold">群发活动</h1><p className="mt-1 text-sm text-muted-foreground">导入收件人、自动分配发件人并跟踪每封邮件的投递状态。</p></div><CampaignsSection mailboxes={composeMailboxes} /></main></ScrollArea>
   ) : mailView === "scheduled" && scheduledSends.isError ? (
     <MailQueryFailure error={scheduledSends.error} onRetry={() => { void scheduledSends.refetch() }} />
   ) : mailView === "scheduled" && canScheduleMail ? (
@@ -1891,10 +1901,10 @@ export function MailPage() {
                 <div className="min-w-0 flex-1 text-sm font-semibold">{mailView === "label" && selectedLabel ? <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: labelDotColor(selectedLabel) }} />{selectedLabel.name}</Badge> : viewTitle}</div>
                 {mailTransferTools}
                   {canSendMail && <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedComposeMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>}
-                <div className="relative basis-full">
+                {mailView !== "campaigns" && <div className="relative basis-full">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
-                </div>
+                </div>}
               </header>
             )}
             <section className="flex min-h-0 flex-1 flex-col">{contentView}</section>
@@ -3925,6 +3935,7 @@ function ComposeDialog({ mailboxes, mailbox, open, draft, limits, canSend, canMa
   const [lastSavedAt, setLastSavedAt] = React.useState<Date | null>(null)
   const [closing, setClosing] = React.useState(false)
   const [scheduleDialogOpen, setScheduleDialogOpen] = React.useState(false)
+  const [composerExpanded, setComposerExpanded] = React.useState(false)
   const [sendIntent, setSendIntent] = React.useState<ComposeSendIntent | null>(null)
   const sendStartedRef = React.useRef(false)
   const lastSavedPayloadRef = React.useRef("")
@@ -3950,6 +3961,7 @@ function ComposeDialog({ mailboxes, mailbox, open, draft, limits, canSend, canMa
     ...(attachmentsTouched ? { attachments: draftAttachments } : {}),
   }), [activeMailboxId, toValue, showCc, ccValue, showBcc, bccValue, subjectValue, body, attachmentsTouched, draftAttachments])
   const hasDraftContent = open && !!activeMailboxId && (toValue.trim() || ccValue.trim() || bccValue.trim() || subjectValue.trim() || body.text.trim() || body.html.trim())
+  React.useEffect(() => { if (!open) setComposerExpanded(false) }, [open])
   const send = useMutation({
     mutationFn: async (payloads: SendPayload[]) => {
       const sent: MailMessage[] = []
@@ -4213,9 +4225,9 @@ function ComposeDialog({ mailboxes, mailbox, open, draft, limits, canSend, canMa
     }
   }
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => { if (nextOpen) onOpenChange(true); else void closeCompose() }}>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (nextOpen) onOpenChange(true); else { setComposerExpanded(false); void closeCompose() } }}>
       <DialogContent
-        className="flex h-svh w-screen max-w-none overflow-hidden p-0 sm:h-[min(88vh,48rem)] sm:w-[min(92vw,56rem)]"
+        className={cn("flex h-svh w-screen max-w-none overflow-hidden p-0 sm:h-[min(88vh,48rem)] sm:w-[min(92vw,56rem)]", composerExpanded && "sm:h-svh sm:w-screen sm:rounded-none")}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
@@ -4282,10 +4294,12 @@ function ComposeDialog({ mailboxes, mailbox, open, draft, limits, canSend, canMa
             <MailBodyComposer
               defaultValue={composerText}
               defaultHtml={draft?.html}
+              expanded={composerExpanded}
               files={files}
               signatureText={signatureText}
               maxAttachmentText={maxAttachmentText}
               onChange={setBody}
+              onExpandedChange={setComposerExpanded}
               onPickFiles={addFiles}
               onRemoveFile={(index) => { setAttachmentsTouched(true); setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)) }}
             />
@@ -4549,7 +4563,7 @@ function scheduleToNodeAttributes(schedule: ScheduleDraft) {
   }
 }
 
-function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, maxAttachmentText, onChange, onPickFiles, onRemoveFile }: { defaultValue: string; defaultHtml?: string; files: File[]; signatureText: string; maxAttachmentText: string; onChange: (value: ComposerValue) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
+function MailBodyComposer({ defaultValue, defaultHtml, expanded, files, signatureText, maxAttachmentText, onChange, onExpandedChange, onPickFiles, onRemoveFile }: { defaultValue: string; defaultHtml?: string; expanded: boolean; files: File[]; signatureText: string; maxAttachmentText: string; onChange: (value: ComposerValue) => void; onExpandedChange: (expanded: boolean) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const dirtyRef = React.useRef(false)
   const lastDefaultRef = React.useRef(`${defaultValue}\n${defaultHtml || ""}`)
@@ -4753,6 +4767,7 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
         <div className="flex items-center gap-1">
           <ToolbarTextButton label="预览" icon={<Eye className="h-4 w-4" />} active={previewOpen} onClick={() => setPreviewOpen(true)} />
           <ToolbarTextButton label="签名" icon={<Signature className="h-4 w-4" />} onClick={insertSignature} disabled={!signatureText.trim()} />
+          <ToolbarButton label={expanded ? "还原编辑窗口" : "放大编辑窗口"} active={expanded} onClick={() => onExpandedChange(!expanded)}>{expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</ToolbarButton>
         </div>
       </div>
       {formatOpen && (

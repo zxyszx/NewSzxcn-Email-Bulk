@@ -1,9 +1,15 @@
 import * as React from "react"
 import DOMPurify from "dompurify"
+import Papa from "papaparse"
+import { EditorContent, useEditor } from "@tiptap/react"
+import StarterKit from "@tiptap/starter-kit"
+import LinkExtension from "@tiptap/extension-link"
+import Placeholder from "@tiptap/extension-placeholder"
+import TextAlign from "@tiptap/extension-text-align"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Circle, ClipboardList, Clock3, Cloud, Copy, Database, Download, ExternalLink, Eye, EyeOff, Globe2, HardDrive, KeyRound, Loader2, Mail, MoreHorizontal, RefreshCcw, Search, Send, ShieldCheck, Trash2, UserRound } from "lucide-react"
-import { api, AdminOverview, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
+import { AlignCenter, AlignLeft, AlignRight, AlertCircle, Bold, CheckCircle2, ChevronDown, ChevronRight, Circle, ClipboardList, Clock3, Cloud, Copy, Database, Download, Eraser, ExternalLink, Eye, EyeOff, FileUp, Globe2, HardDrive, Italic, KeyRound, Link, List, ListOrdered, Loader2, Mail, Maximize2, Megaphone, Minimize2, MoreHorizontal, Pause, Play, Redo2, RefreshCcw, RotateCcw, Search, Send, ShieldCheck, Strikethrough, Trash2, Underline, Undo2, UserRound, UsersRound, XCircle } from "lucide-react"
+import { api, AdminOverview, AdminUser, Alias, Campaign, CampaignInput, CampaignRecipient, CampaignSuppression, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -2777,3 +2783,272 @@ function SelectField({ label, value, onValueChange, items, disabled = false }: {
   return <div className="space-y-2"><Label htmlFor={id}>{label}</Label><Select value={value} onValueChange={onValueChange} disabled={disabled}><SelectTrigger id={id}><SelectValue /></SelectTrigger><SelectContent>{items.map(([value, itemLabel]) => <SelectItem key={value} value={value}>{itemLabel}</SelectItem>)}</SelectContent></Select></div>
 }
 function DomainSelect({ domains, value, onChange }: { domains: Domain[]; value: string; onChange: (value: string) => void }) { return <div className="space-y-2"><Label>域名</Label><Select value={value} onValueChange={onChange}><SelectTrigger><SelectValue placeholder="选择域名" /></SelectTrigger><SelectContent>{domains.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent></Select></div> }
+
+type CampaignPageTab = "campaigns" | "suppressions"
+type RecipientTab = "sending" | "delivered" | "failed"
+
+export function CampaignsSection({ mailboxes }: { mailboxes: MailboxType[] }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const user = useMe().data?.user
+  const canManage = hasPermission(user, "admin.campaigns.manage")
+  const [tab, setTab] = React.useState<CampaignPageTab>("campaigns")
+  const [createOpen, setCreateOpen] = React.useState(false)
+  const [detailId, setDetailId] = React.useState("")
+  const campaigns = useQuery({ queryKey: ["admin", "campaigns"], queryFn: api.campaigns, refetchInterval: 5000 })
+  const suppressions = useQuery({ queryKey: ["admin", "campaign-suppressions"], queryFn: api.campaignSuppressions, enabled: tab === "suppressions" })
+  const action = useMutation({
+    mutationFn: ({ id, kind }: { id: string; kind: "start" | "pause" | "resume" | "cancel" }) => kind === "start" ? api.startCampaign(id) : kind === "pause" ? api.pauseCampaign(id) : kind === "resume" ? api.resumeCampaign(id) : api.cancelCampaign(id),
+    onSuccess: async (_, variables) => {
+      await qc.invalidateQueries({ queryKey: ["admin", "campaigns"] })
+      toast({ title: variables.kind === "start" ? "活动已启动" : variables.kind === "pause" ? "活动已暂停" : variables.kind === "resume" ? "活动已继续" : "活动已取消" })
+    },
+    onError: (error) => toast({ title: "操作失败", description: error.message }),
+  })
+  const items = campaigns.data?.items || []
+  const totals = React.useMemo(() => items.reduce((sum, item) => ({ total: sum.total + item.totalCount, delivered: sum.delivered + item.deliveredCount, failed: sum.failed + item.failedCount, active: sum.active + (item.status === "running" || item.status === "scheduled" ? 1 : 0) }), { total: 0, delivered: 0, failed: 0, active: 0 }), [items])
+
+  return <div className="space-y-3">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+      <div className="inline-flex h-9 rounded-md border bg-muted/30 p-0.5">
+        <Button type="button" size="sm" variant={tab === "campaigns" ? "secondary" : "ghost"} className="h-8" onClick={() => setTab("campaigns")}><Megaphone className="mr-2 h-4 w-4" />发送活动</Button>
+        <Button type="button" size="sm" variant={tab === "suppressions" ? "secondary" : "ghost"} className="h-8" onClick={() => setTab("suppressions")}><ShieldCheck className="mr-2 h-4 w-4" />退订名单</Button>
+      </div>
+      {tab === "campaigns" && canManage && <Button type="button" onClick={() => setCreateOpen(true)}><Send className="mr-2 h-4 w-4" />新建群发</Button>}
+    </div>
+
+    {tab === "campaigns" && <>
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <CampaignMetric label="进行中" value={totals.active} icon={<Clock3 />} />
+        <CampaignMetric label="收件人" value={totals.total} icon={<UsersRound />} />
+        <CampaignMetric label="发送完成" value={totals.delivered} icon={<CheckCircle2 />} tone="success" />
+        <CampaignMetric label="发送失败" value={totals.failed} icon={<AlertCircle />} tone={totals.failed > 0 ? "danger" : "default"} />
+      </div>
+      {campaigns.isPending && <Skeleton className="h-72 w-full" />}
+      {campaigns.isError && <QueryFailure error={campaigns.error} onRetry={() => campaigns.refetch()} />}
+      {!campaigns.isPending && !campaigns.isError && <div className="overflow-hidden rounded-lg border">
+        <div className="hidden grid-cols-[minmax(180px,1.4fr)_minmax(140px,1fr)_92px_150px_132px_112px] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground lg:grid">
+          <span>活动</span><span>发件人</span><span>状态</span><span>进度</span><span>发送速度</span><span className="text-right">操作</span>
+        </div>
+        {items.length === 0 && <div className="grid min-h-48 place-items-center px-4 text-sm text-muted-foreground">暂无群发活动</div>}
+        {items.map((item) => <div key={item.id} className="grid gap-3 border-b px-3 py-3 last:border-b-0 lg:grid-cols-[minmax(180px,1.4fr)_minmax(140px,1fr)_92px_150px_132px_112px] lg:items-center">
+          <Button type="button" variant="ghost" className="h-auto min-w-0 justify-start p-0 text-left font-normal" onClick={() => setDetailId(item.id)}><span className="min-w-0"><span className="block truncate font-medium hover:underline">{item.name}</span><span className="block truncate text-xs text-muted-foreground">{item.subject}</span></span></Button>
+          <div className="min-w-0"><div className="truncate text-sm">{item.senderCount > 1 ? `${item.senderCount} 个邮箱自动分配` : item.mailboxAddress}</div><div className="text-xs text-muted-foreground">共 {item.totalCount} 位收件人</div></div>
+          <CampaignStatusBadge status={item.status} />
+          <CampaignProgress item={item} />
+          <div className="text-sm"><span className="font-medium">{item.ratePerMinute}</span> 封/分钟</div>
+          <div className="flex justify-end gap-1">
+            {canManage && item.status === "draft" && <Button type="button" size="icon" variant="ghost" title="开始发送" aria-label="开始发送" onClick={() => action.mutate({ id: item.id, kind: "start" })}><Play className="h-4 w-4" /></Button>}
+            {canManage && (item.status === "running" || item.status === "scheduled") && <Button type="button" size="icon" variant="ghost" title="暂停" aria-label="暂停活动" onClick={() => action.mutate({ id: item.id, kind: "pause" })}><Pause className="h-4 w-4" /></Button>}
+            {canManage && item.status === "paused" && <Button type="button" size="icon" variant="ghost" title="继续" aria-label="继续活动" onClick={() => action.mutate({ id: item.id, kind: "resume" })}><Play className="h-4 w-4" /></Button>}
+            {canManage && ["draft", "scheduled", "running", "paused"].includes(item.status) && <Button type="button" size="icon" variant="ghost" className="text-destructive" title="取消" aria-label="取消活动" onClick={() => action.mutate({ id: item.id, kind: "cancel" })}><XCircle className="h-4 w-4" /></Button>}
+            <Button type="button" size="icon" variant="ghost" title="查看明细" aria-label="查看活动明细" onClick={() => setDetailId(item.id)}><ChevronRight className="h-4 w-4" /></Button>
+          </div>
+        </div>)}
+      </div>}
+    </>}
+
+    {tab === "suppressions" && <CampaignSuppressions items={suppressions.data?.items || []} loading={suppressions.isPending} canManage={canManage} />}
+    <CampaignEditorDialog open={createOpen} onOpenChange={setCreateOpen} mailboxes={mailboxes.filter((mailbox) => mailbox.status === "active")} />
+    <CampaignDetailDialog id={detailId} open={!!detailId} onOpenChange={(open) => { if (!open) setDetailId("") }} canManage={canManage} />
+  </div>
+}
+
+function CampaignMetric({ label, value, icon, tone = "default" }: { label: string; value: number; icon: React.ReactNode; tone?: "default" | "success" | "danger" }) {
+  return <div className={cn("flex min-h-[72px] items-center gap-3 rounded-lg border px-3 py-2", tone === "success" && "border-emerald-500/30 bg-emerald-500/[0.06]", tone === "danger" && "border-destructive/30 bg-destructive/5")}><span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground [&>svg]:h-4 [&>svg]:w-4", tone === "success" && "bg-emerald-500/10 text-emerald-700", tone === "danger" && "bg-destructive/10 text-destructive")}>{icon}</span><div><div className="text-xl font-semibold tabular-nums">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div></div>
+}
+
+const campaignStatusText: Record<Campaign["status"], string> = { draft: "草稿", scheduled: "待发送", running: "发送中", paused: "已暂停", completed: "已完成", canceled: "已取消" }
+function CampaignStatusBadge({ status }: { status: Campaign["status"] }) {
+  return <Badge variant={status === "completed" ? "default" : status === "canceled" ? "destructive" : "outline"} className={cn("w-fit", status === "running" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-700", status === "paused" && "border-amber-500/40 bg-amber-500/10 text-amber-700")}>{campaignStatusText[status]}</Badge>
+}
+function CampaignProgress({ item }: { item: Campaign }) {
+  const done = item.deliveredCount + item.failedCount + item.suppressedCount
+  const percent = item.totalCount ? Math.min(100, Math.round(done / item.totalCount * 100)) : 0
+  return <div className="min-w-0"><div className="mb-1 flex justify-between text-xs"><span>{item.deliveredCount}/{item.totalCount}</span><span className="text-muted-foreground">{percent}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-[width] duration-300" style={{ width: `${percent}%` }} /></div></div>
+}
+
+function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean; onOpenChange: (open: boolean) => void; mailboxes: MailboxType[] }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const fileRef = React.useRef<HTMLInputElement>(null)
+  const [name, setName] = React.useState("")
+  const [subject, setSubject] = React.useState("")
+  const [body, setBody] = React.useState({ text: "", html: "" })
+  const [recipientText, setRecipientText] = React.useState("")
+  const [mailboxIds, setMailboxIds] = React.useState<string[]>([])
+  const [rate, setRate] = React.useState(30)
+  const [scheduledAt, setScheduledAt] = React.useState("")
+  const [consent, setConsent] = React.useState(false)
+  const [sendersExpanded, setSendersExpanded] = React.useState(false)
+  const [bodyExpanded, setBodyExpanded] = React.useState(false)
+  const parsed = React.useMemo(() => parseCampaignRecipients(recipientText), [recipientText])
+  React.useEffect(() => { if (open && mailboxIds.length === 0 && mailboxes[0]) setMailboxIds([mailboxes[0].id]) }, [open, mailboxes, mailboxIds.length])
+  const create = useMutation({
+    mutationFn: async ({ start }: { start: boolean }) => {
+      const payload: CampaignInput = { mailboxIds, name, subject, text: body.text, html: body.html, ratePerMinute: rate, scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined, consentConfirmed: consent, recipients: parsed.items }
+      const item = await api.createCampaign(payload)
+      return start ? api.startCampaign(item.id) : item
+    },
+    onSuccess: async (item) => { await qc.invalidateQueries({ queryKey: ["admin", "campaigns"] }); toast({ title: item.status === "draft" ? "草稿已保存" : item.status === "scheduled" ? "活动已设置定时发送" : "活动已启动" }); onOpenChange(false); setName(""); setSubject(""); setBody({ text: "", html: "" }); setRecipientText(""); setScheduledAt(""); setConsent(false) },
+    onError: (error) => toast({ title: "保存失败", description: error.message }),
+  })
+  const ready = mailboxIds.length > 0 && name.trim() && subject.trim() && body.text.trim() && parsed.items.length > 0
+  const visibleMailboxes = sendersExpanded ? mailboxes : mailboxes.slice(0, 4)
+  const senderAllocation = (mailboxID: string) => {
+    const index = mailboxIds.indexOf(mailboxID)
+    if (index < 0 || mailboxIds.length === 0) return 0
+    return Math.floor(parsed.items.length / mailboxIds.length) + (index < parsed.items.length % mailboxIds.length ? 1 : 0)
+  }
+  const toggleMailbox = (id: string, checked: boolean) => setMailboxIds((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id))
+  async function readCSV(file?: File) {
+    if (!file) return
+    try {
+      const imported = parseCampaignRecipients(await file.text())
+      setRecipientText(imported.items.map((item) => item.email).join("\n"))
+      toast({ title: `已导入 ${imported.items.length} 个邮箱`, description: imported.duplicates || imported.invalid ? `已跳过 ${imported.duplicates} 个重复、${imported.invalid} 个无效地址` : undefined })
+    } catch {
+      toast({ title: "文件读取失败" })
+    }
+  }
+  return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) setBodyExpanded(false); onOpenChange(nextOpen) }}><DialogContent className={cn("flex max-h-[92svh] max-w-5xl flex-col overflow-hidden p-0", bodyExpanded && "h-svh w-screen max-h-none max-w-none rounded-none")}><DialogHeader className="border-b px-5 py-4"><DialogTitle>新建群发活动</DialogTitle></DialogHeader><ScrollArea className="min-h-0 flex-1"><div className="grid gap-5 p-5 lg:grid-cols-2">
+    <div className="space-y-4">
+      <Field label="活动名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：8 月产品通知" />
+      <Field label="邮件主题" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="收件人看到的主题" />
+      <div className="space-y-2"><Label>邮件正文</Label><CampaignBodyEditor value={body} expanded={bodyExpanded} onExpandedChange={setBodyExpanded} onChange={setBody} /></div>
+      <div className="grid grid-cols-2 gap-3"><Field label="每分钟发送" type="number" min={1} max={300} value={rate} onChange={(event) => setRate(Math.max(1, Math.min(300, Number(event.target.value) || 1)))} /><Field label="定时发送（可选）" required={false} type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></div>
+    </div>
+    <div className="space-y-4">
+      <div className="space-y-2"><div className="flex items-center justify-between"><Label>发件人</Label><Button type="button" size="sm" variant="ghost" onClick={() => setMailboxIds(mailboxIds.length === mailboxes.length ? [] : mailboxes.map((item) => item.id))}>{mailboxIds.length === mailboxes.length ? "取消全选" : "全选"}</Button></div><div className={cn("grid grid-cols-1 gap-1 rounded-md border p-2 sm:grid-cols-2", sendersExpanded && "max-h-44 overflow-y-auto")}>{visibleMailboxes.map((mailbox) => <label key={mailbox.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-muted"><Checkbox checked={mailboxIds.includes(mailbox.id)} onCheckedChange={(checked) => toggleMailbox(mailbox.id, checked === true)} /><span className="min-w-0 flex-1 truncate" title={mailbox.address}>{mailbox.address}</span>{mailboxIds.includes(mailbox.id) && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">预计发送 {senderAllocation(mailbox.id)} 封</span>}</label>)}</div>{mailboxes.length > 4 && <Button type="button" size="sm" variant="ghost" className="h-8 w-full text-xs text-muted-foreground" aria-expanded={sendersExpanded} onClick={() => setSendersExpanded((current) => !current)}><ChevronDown className={cn("mr-1 h-3.5 w-3.5 transition-transform", sendersExpanded && "rotate-180")} />{sendersExpanded ? "收起发件人" : `查看全部发件人 (${mailboxes.length})`}</Button>}<div className="text-xs text-muted-foreground">已选 {mailboxIds.length} 位发件人，{parsed.items.length} 位收件人会自动均匀分配；余数按所选顺序每人多发 1 封。</div></div>
+      <div className="space-y-2"><div className="flex items-center justify-between gap-2"><div><Label htmlFor="campaign-recipients">收件人</Label><p className="mt-1 text-xs text-muted-foreground">每行只填写一个邮箱账号，无需姓名。</p></div><div><Input ref={fileRef} className="hidden" type="file" accept=".csv,text/csv" onChange={(event) => { void readCSV(event.target.files?.[0]); event.target.value = "" }} /><Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />导入 CSV</Button></div></div><Textarea id="campaign-recipients" className="min-h-[180px] resize-y font-mono text-xs" value={recipientText} onChange={(event) => setRecipientText(event.target.value)} placeholder={'zhangsan@example.com\nlisi@example.com'} /><div className="grid grid-cols-3 gap-2 text-xs"><span className="rounded bg-emerald-500/10 px-2 py-1.5 text-emerald-700">有效 {parsed.items.length}</span><span className="rounded bg-muted px-2 py-1.5 text-muted-foreground">重复 {parsed.duplicates}</span><span className={cn("rounded px-2 py-1.5", parsed.invalid ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>无效 {parsed.invalid}</span></div></div>
+      <label className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-3"><Checkbox checked={consent} onCheckedChange={(checked) => setConsent(checked === true)} /><span className="text-sm leading-5">确认名单中的收件人已明确同意接收此类邮件，并接受邮件自动附加退订链接。</span></label>
+    </div>
+  </div></ScrollArea><DialogFooter className="border-t px-5 py-4"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button><Button type="button" variant="secondary" disabled={!ready || create.isPending} onClick={() => create.mutate({ start: false })}>保存草稿</Button><Button type="button" disabled={!ready || !consent || create.isPending} onClick={() => create.mutate({ start: true })}>{create.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}开始发送</Button></DialogFooter></DialogContent></Dialog>
+}
+
+function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { value: { text: string; html: string }; expanded: boolean; onExpandedChange: (expanded: boolean) => void; onChange: (value: { text: string; html: string }) => void }) {
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ link: false }),
+      LinkExtension.configure({ openOnClick: false, HTMLAttributes: { target: "_blank", rel: "noopener noreferrer" } }),
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Placeholder.configure({ placeholder: "输入邮件正文，退订链接会自动添加到末尾。" }),
+    ],
+    content: value.html || "<p></p>",
+    editorProps: {
+      attributes: {
+        class: "mail-html min-h-[180px] w-full px-3 py-3 text-sm leading-6 outline-none [overflow-wrap:anywhere]",
+        "aria-label": "邮件正文",
+        spellcheck: "true",
+      },
+    },
+    onUpdate({ editor: current }) {
+      const text = current.getText({ blockSeparator: "\n" }).replace(/\u00a0/g, " ").trimEnd()
+      const html = DOMPurify.sanitize(current.getHTML())
+      onChange({ text, html: text.trim() ? html : "" })
+    },
+  })
+
+  function toggleLink() {
+    if (!editor) return
+    if (editor.isActive("link")) {
+      editor.chain().focus().unsetLink().run()
+      return
+    }
+    const entered = window.prompt("请输入链接地址，例如 https://example.com")?.trim()
+    if (!entered) return
+    const href = /^(https?:|mailto:|tel:|#|\/)/i.test(entered) ? entered : `https://${entered}`
+    editor.chain().focus().extendMarkRange("link").setLink({ href }).run()
+  }
+
+  return <div className="overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+    <div className="flex min-h-11 flex-wrap items-center gap-1 border-b bg-muted/30 px-2 py-1.5" aria-label="正文格式工具栏">
+      <CampaignToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 /></CampaignToolbarButton>
+      <CampaignToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 /></CampaignToolbarButton>
+      <Separator orientation="vertical" className="mx-1 h-6" />
+      <CampaignToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser /></CampaignToolbarButton>
+      <CampaignToolbarButton label="加粗" active={editor?.isActive("bold")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></CampaignToolbarButton>
+      <CampaignToolbarButton label="斜体" active={editor?.isActive("italic")} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></CampaignToolbarButton>
+      <CampaignToolbarButton label="下划线" active={editor?.isActive("underline")} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline /></CampaignToolbarButton>
+      <CampaignToolbarButton label="删除线" active={editor?.isActive("strike")} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough /></CampaignToolbarButton>
+      <CampaignToolbarButton label="链接" active={editor?.isActive("link")} disabled={!editor} onClick={toggleLink}><Link /></CampaignToolbarButton>
+      <Separator orientation="vertical" className="mx-1 h-6" />
+      <CampaignToolbarButton label="无序列表" active={editor?.isActive("bulletList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List /></CampaignToolbarButton>
+      <CampaignToolbarButton label="有序列表" active={editor?.isActive("orderedList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered /></CampaignToolbarButton>
+      <CampaignToolbarButton label="左对齐" active={editor?.isActive({ textAlign: "left" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("left").run()}><AlignLeft /></CampaignToolbarButton>
+      <CampaignToolbarButton label="居中" active={editor?.isActive({ textAlign: "center" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("center").run()}><AlignCenter /></CampaignToolbarButton>
+      <CampaignToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight /></CampaignToolbarButton>
+      <span className="ml-auto whitespace-nowrap px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">{value.text.replace(/\s/g, "").length} 字</span>
+      <CampaignToolbarButton label={expanded ? "还原编辑窗口" : "放大编辑窗口"} active={expanded} onClick={() => onExpandedChange(!expanded)}>{expanded ? <Minimize2 /> : <Maximize2 />}</CampaignToolbarButton>
+    </div>
+    <div className={cn("max-h-[260px] min-h-[180px] overflow-y-auto [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6", expanded && "max-h-none min-h-[calc(100svh-18rem)]")}>
+      <EditorContent editor={editor} />
+    </div>
+  </div>
+}
+
+function CampaignToolbarButton({ label, active, disabled, onClick, children }: { label: string; active?: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <Button type="button" size="icon" variant={active ? "secondary" : "ghost"} className="h-8 w-8 shrink-0 [&_svg]:h-4 [&_svg]:w-4" title={label} aria-label={label} aria-pressed={active || undefined} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>{children}</Button>
+}
+
+function parseCampaignRecipients(raw: string): { items: { email: string }[]; duplicates: number; invalid: number } {
+  if (!raw.trim()) return { items: [], duplicates: 0, invalid: 0 }
+  const result = Papa.parse<string[]>(raw, { skipEmptyLines: "greedy" })
+  const rows = result.data.map((row) => row.map((cell) => String(cell || "").trim())).filter((row) => row.some(Boolean))
+  const emailAliases = ["email", "e-mail", "邮箱", "邮箱地址"]
+  let emailColumn = -1
+  if (rows[0]) {
+    emailColumn = rows[0].findIndex((cell) => emailAliases.includes(cell.toLowerCase()))
+    if (emailColumn >= 0) rows.shift()
+  }
+  const seen = new Set<string>()
+  const items: { email: string }[] = []
+  let duplicates = 0
+  let invalid = result.errors.filter((error) => error.type === "Quotes").length
+  const add = (email: string) => {
+    email = email.trim().toLowerCase()
+    if (!campaignEmailPattern.test(email)) { invalid += 1; return }
+    if (seen.has(email)) { duplicates += 1; return }
+    seen.add(email); items.push({ email })
+  }
+  for (const row of rows) {
+    if (emailColumn >= 0) { add(row[emailColumn] || ""); continue }
+    const emailCells = row.filter((cell) => campaignEmailPattern.test(cell.toLowerCase()))
+    if (emailCells.length > 1 && emailCells.length === row.filter(Boolean).length) { emailCells.forEach((email) => add(email)); continue }
+    const index = row.findIndex((cell) => campaignEmailPattern.test(cell.toLowerCase()))
+    if (index < 0) { invalid += 1; continue }
+    add(row[index])
+  }
+  return { items, duplicates, invalid }
+}
+const campaignEmailPattern = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/
+
+function CampaignDetailDialog({ id, open, onOpenChange, canManage }: { id: string; open: boolean; onOpenChange: (open: boolean) => void; canManage: boolean }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const [tab, setTab] = React.useState<RecipientTab>("sending")
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set())
+  const [retryAll, setRetryAll] = React.useState(false)
+  const detail = useQuery({ queryKey: ["admin", "campaign", id], queryFn: () => api.campaign(id), enabled: open && !!id, refetchInterval: open ? 4000 : false })
+  React.useEffect(() => { setSelected(new Set()); setRetryAll(false) }, [id, tab])
+  const recipients = detail.data?.recipients || []
+  const filtered = recipients.filter((recipient) => tab === "sending" ? recipient.status === "pending" || recipient.status === "queued" : recipient.status === tab)
+  const failedIDs = filtered.filter((recipient) => recipient.status === "failed").map((recipient) => recipient.id)
+  const retry = useMutation({ mutationFn: () => api.retryCampaignRecipients(id, retryAll ? [] : [...selected]), onSuccess: async (result) => { setSelected(new Set()); setRetryAll(false); await Promise.all([qc.invalidateQueries({ queryKey: ["admin", "campaign", id] }), qc.invalidateQueries({ queryKey: ["admin", "campaigns"] })]); toast({ title: `已重新加入 ${result.retried} 位收件人` }) }, onError: (error) => toast({ title: "重新发送失败", description: error.message }) })
+  const allSelected = retryAll || (failedIDs.length > 0 && failedIDs.every((recipientID) => selected.has(recipientID)))
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="flex max-h-[90svh] max-w-5xl flex-col overflow-hidden p-0"><DialogHeader className="border-b px-5 py-4"><DialogTitle>{detail.data?.name || "活动明细"}</DialogTitle></DialogHeader>{detail.isPending ? <div className="p-5"><Skeleton className="h-72 w-full" /></div> : detail.data && <><div className="space-y-3 border-b px-5 py-4"><div className="flex flex-wrap items-center gap-2"><CampaignStatusBadge status={detail.data.status} /><span className="text-sm text-muted-foreground">{detail.data.subject}</span><span className="ml-auto text-sm text-muted-foreground">{detail.data.ratePerMinute} 封/分钟</span></div><CampaignProgress item={detail.data} /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{detail.data.senders?.map((sender) => <div key={sender.mailboxId} className="rounded-md border px-3 py-2"><div className="truncate text-sm font-medium">{sender.address}</div><div className="text-xs text-muted-foreground">分配 {sender.recipientCount} 位</div></div>)}</div></div><div className="flex items-center gap-1 border-b px-5 py-2">{(["sending", "delivered", "failed"] as RecipientTab[]).map((item) => <Button key={item} type="button" size="sm" variant={tab === item ? "secondary" : "ghost"} onClick={() => setTab(item)}>{item === "sending" ? `发送中 ${detail.data!.pendingCount + detail.data!.queuedCount}` : item === "delivered" ? `发送完成 ${detail.data!.deliveredCount}` : `发送失败 ${detail.data!.failedCount}`}</Button>)}{tab === "failed" && canManage && failedIDs.length > 0 && <Button type="button" size="sm" className="ml-auto" disabled={(!retryAll && selected.size === 0) || retry.isPending} onClick={() => retry.mutate()}><RotateCcw className="mr-2 h-4 w-4" />{retryAll ? `重新发送全部 (${detail.data.failedCount})` : `重新发送所选 (${selected.size})`}</Button>}</div><ScrollArea className="min-h-0 flex-1"><div className="p-5">{filtered.length === 0 ? <div className="grid min-h-40 place-items-center text-sm text-muted-foreground">当前没有记录</div> : <div className="overflow-hidden rounded-md border"><Table><TableHeader><TableRow>{tab === "failed" && <TableHead className="w-12"><Checkbox checked={allSelected} aria-label="全选失败收件人" onCheckedChange={(checked) => { const value = checked === true; setRetryAll(value); setSelected(value ? new Set(failedIDs) : new Set()) }} /></TableHead>}<TableHead>收件人</TableHead><TableHead>发件人</TableHead><TableHead>状态</TableHead><TableHead>时间 / 原因</TableHead></TableRow></TableHeader><TableBody>{filtered.map((recipient) => <CampaignRecipientRow key={recipient.id} recipient={recipient} sender={detail.data!.senders?.find((sender) => sender.mailboxId === recipient.mailboxId)?.address || "-"} selectable={tab === "failed"} selected={retryAll || selected.has(recipient.id)} onSelected={(checked) => { setRetryAll(false); setSelected((current) => { const next = new Set(current); if (checked) next.add(recipient.id); else next.delete(recipient.id); return next }) }} />)}</TableBody></Table></div>}</div></ScrollArea></>}</DialogContent></Dialog>
+}
+
+function CampaignRecipientRow({ recipient, sender, selectable, selected, onSelected }: { recipient: CampaignRecipient; sender: string; selectable: boolean; selected: boolean; onSelected: (checked: boolean) => void }) {
+  return <TableRow>{selectable && <TableCell><Checkbox checked={selected} aria-label={`选择 ${recipient.email}`} onCheckedChange={(checked) => onSelected(checked === true)} /></TableCell>}<TableCell><div className="font-medium">{recipient.email}</div>{recipient.name && <div className="text-xs text-muted-foreground">{recipient.name}</div>}</TableCell><TableCell className="max-w-48 truncate text-xs" title={sender}>{sender}</TableCell><TableCell><Badge variant={recipient.status === "delivered" ? "default" : recipient.status === "failed" ? "destructive" : "outline"}>{recipient.status === "delivered" ? "发送完成" : recipient.status === "failed" ? "发送失败" : "发送中"}</Badge></TableCell><TableCell className="max-w-72 text-xs text-muted-foreground">{recipient.lastError || (recipient.deliveredAt ? formatDate(recipient.deliveredAt) : recipient.queuedAt ? formatDate(recipient.queuedAt) : "等待发送")}</TableCell></TableRow>
+}
+
+function CampaignSuppressions({ items, loading, canManage }: { items: CampaignSuppression[]; loading: boolean; canManage: boolean }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const [email, setEmail] = React.useState("")
+  const [reason, setReason] = React.useState("")
+  const add = useMutation({ mutationFn: () => api.createCampaignSuppression({ email, reason }), onSuccess: async () => { setEmail(""); setReason(""); await qc.invalidateQueries({ queryKey: ["admin", "campaign-suppressions"] }); toast({ title: "已加入退订名单" }) }, onError: (error) => toast({ title: "添加失败", description: error.message }) })
+  const remove = useMutation({ mutationFn: api.deleteCampaignSuppression, onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["admin", "campaign-suppressions"] }); toast({ title: "已移出退订名单" }) }, onError: (error) => toast({ title: "移除失败", description: error.message }) })
+  return <div className="space-y-3">{canManage && <div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(220px,1fr)_minmax(240px,1.5fr)_auto]"><Input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱地址" aria-label="退订邮箱地址" /><Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="原因（可选）" aria-label="加入退订名单的原因" /><Button type="button" disabled={!email.trim() || add.isPending} onClick={() => add.mutate()}>加入名单</Button></div>}{loading ? <Skeleton className="h-64 w-full" /> : <div className="overflow-hidden rounded-lg border"><Table><TableHeader><TableRow><TableHead>邮箱地址</TableHead><TableHead>来源</TableHead><TableHead>原因</TableHead><TableHead>加入时间</TableHead>{canManage && <TableHead className="w-16" />}</TableRow></TableHeader><TableBody>{items.map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.email}</TableCell><TableCell>{item.source === "unsubscribe" ? "主动退订" : "手动添加"}</TableCell><TableCell>{item.reason}</TableCell><TableCell>{formatDate(item.createdAt)}</TableCell>{canManage && <TableCell><Button type="button" size="icon" variant="ghost" className="text-destructive" aria-label={`移出 ${item.email}`} title="移出名单" onClick={() => remove.mutate(item.id)}><Trash2 className="h-4 w-4" /></Button></TableCell>}</TableRow>)}{items.length === 0 && <TableRow><TableCell colSpan={canManage ? 5 : 4} className="h-36 text-center text-muted-foreground">退订名单为空</TableCell></TableRow>}</TableBody></Table></div>}</div>
+}

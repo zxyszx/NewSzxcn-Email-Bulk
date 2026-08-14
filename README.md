@@ -1,19 +1,15 @@
-# NewSzxcn-Email
+# NewSzxcn-Email-Bulk
 
-NewSzxcn-Email 是一个可自建、可管理、带完整 Webmail 与管理后台的开源邮箱系统。
+NewSzxcn-Email-Bulk 是独立的群发定制版邮箱系统，保留完整 Webmail 与管理后台，并增加合规群发、多发件人自动分配和逐封投递跟踪。
 
-[![Release](https://img.shields.io/github/v/release/zxyszx/NewSzxcn-Email?display_name=tag&sort=semver)](https://github.com/zxyszx/NewSzxcn-Email/releases)
-[![Docker Release](https://github.com/zxyszx/NewSzxcn-Email/actions/workflows/docker.yml/badge.svg)](https://github.com/zxyszx/NewSzxcn-Email/actions/workflows/docker.yml)
-[![CI](https://github.com/zxyszx/NewSzxcn-Email/actions/workflows/ci.yml/badge.svg)](https://github.com/zxyszx/NewSzxcn-Email/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/zxyszx/NewSzxcn-Email)](LICENSE)
-
-[邮箱后台配置指南](docs/GUIDE.md) · [版本发布](https://github.com/zxyszx/NewSzxcn-Email/releases) · [部署文档](deploy/README.md) · [English](README.en.md)
+[邮箱后台配置指南](docs/GUIDE.md) · [版本发布](https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/releases) · [部署文档](deploy/README.md) · [English](README.en.md)
 
 ## 主要功能
 
 | 模块 | 能力 |
 | --- | --- |
 | Webmail | 收发邮件、草稿、附件、搜索、星标、标签、自定义文件夹、稍后提醒、导入与导出 |
+| 群发活动 | CSV/粘贴导入收件人、多发件人平均分配、限速、定时、暂停、失败重试、退订名单与逐封状态 |
 | 邮箱管理 | 多邮箱切换、邮箱申请、暂停收信、账号级与邮箱级转发、外部 IMAP |
 | 收信规则 | 多条件匹配、移动、标记、删除、转发、规则排序与应用到已有邮件 |
 | 管理后台 | 账号、权限配置、域名、邮箱、转发、全部邮件、发送队列、系统设置 |
@@ -26,13 +22,13 @@ NewSzxcn-Email 是一个可自建、可管理、带完整 Webmail 与管理后�
 支持 Debian / Ubuntu 的 `amd64` 与 `arm64` 服务器。建议至少 2 核、2 GB 内存，并准备一个已解析到服务器的邮件主机名，例如 `mail.example.com`。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email/main/install.sh | sudo bash
+curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh | sudo bash
 ```
 
 已使用 `root` 登录时，也可以使用：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email/main/install.sh)
+bash <(curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh)
 ```
 
 ### 管理面板
@@ -100,7 +96,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email/main/i
 - 选择自动 Nginx + SSL、宝塔/已有 Nginx 反代或 HTTP 测试模式
 - 自动模式使用官方 `acme.sh` 签发和续期证书，不会强制停止占用 80 端口的进程
 - 创建 `/opt/newszxcn-email` 持久化目录
-- 拉取 GHCR 镜像并启动邮件服务
+- 拉取 Gitea 容器镜像并启动邮件服务；镜像不可用时自动从源码构建
 - 生成后台在线更新所需的内部鉴权令牌
 - 等待 Web 与 API 健康检查通过
 
@@ -194,8 +190,8 @@ sudo newszxcn-email uninstall
 需要自行控制 Compose 配置时：
 
 ```bash
-git clone https://github.com/zxyszx/NewSzxcn-Email.git
-cd NewSzxcn-Email/deploy
+git clone https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk.git
+cd NewSzxcn-Email-Bulk/deploy
 cp .env.example .env
 # 编辑 .env
 docker compose pull
@@ -216,7 +212,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - 后端：Go、Chi、SQLite
 - 前端：React、TypeScript、TanStack Query、shadcn/ui、Tailwind CSS
 - 邮件：Postfix、Dovecot、Rspamd
-- 部署：Docker、Docker Compose、GitHub Actions、GHCR
+- 部署：Docker、Docker Compose、Gitea
 
 ## 本地开发
 

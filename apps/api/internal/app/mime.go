@@ -13,6 +13,7 @@ import (
 	netmail "net/mail"
 	"net/smtp"
 	"net/textproto"
+	"sort"
 	"strings"
 	"time"
 )
@@ -31,6 +32,7 @@ type MIMEMessage struct {
 	MessageID   string
 	Date        time.Time
 	Attachments []AttachmentInput
+	Headers     map[string]string
 }
 
 func BuildMIME(m MIMEMessage) ([]byte, error) {
@@ -47,6 +49,12 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 	writeHeader("Message-ID", m.MessageID)
 	writeHeader("Date", m.Date.Format(time.RFC1123Z))
 	writeHeader("MIME-Version", "1.0")
+	for _, key := range sortedMIMEHeaderKeys(m.Headers) {
+		if !validMIMEHeader(key, m.Headers[key]) {
+			return nil, fmt.Errorf("invalid MIME header %q", key)
+		}
+		writeHeader(key, m.Headers[key])
+	}
 
 	mixed := multipart.NewWriter(&buf)
 	writeHeader("Content-Type", `multipart/mixed; boundary="`+mixed.Boundary()+`"`)
@@ -104,6 +112,28 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func sortedMIMEHeaderKeys(headers map[string]string) []string {
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func validMIMEHeader(key, value string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" || strings.ContainsAny(key, "\r\n:") || strings.ContainsAny(value, "\r\n") {
+		return false
+	}
+	for _, r := range key {
+		if r < 33 || r > 126 {
+			return false
+		}
+	}
+	return true
 }
 
 func formatAddressHeader(name, address string) string {

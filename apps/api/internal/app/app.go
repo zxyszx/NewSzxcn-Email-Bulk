@@ -129,6 +129,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		a.startWorker(func() { a.maildirWorker(workerCtx) })
 	}
 	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
+	a.startWorker(func() { a.campaignWorker(workerCtx) })
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
 	a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
@@ -415,6 +416,66 @@ func (a *App) migrate(ctx context.Context) error {
 			delivered_at TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_send_queue_due ON send_queue(status, next_attempt_at, created_at)`,
+		`CREATE TABLE IF NOT EXISTS campaigns (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			body_text TEXT NOT NULL DEFAULT '',
+			body_html TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','running','paused','completed','canceled')),
+			rate_per_minute INTEGER NOT NULL DEFAULT 30,
+			consent_confirmed INTEGER NOT NULL DEFAULT 0,
+			total_count INTEGER NOT NULL DEFAULT 0,
+			pending_count INTEGER NOT NULL DEFAULT 0,
+			queued_count INTEGER NOT NULL DEFAULT 0,
+			delivered_count INTEGER NOT NULL DEFAULT 0,
+			failed_count INTEGER NOT NULL DEFAULT 0,
+			suppressed_count INTEGER NOT NULL DEFAULT 0,
+			scheduled_at TEXT,
+			next_dispatch_at TEXT,
+			started_at TEXT,
+			completed_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaigns_status_dispatch ON campaigns(status,next_dispatch_at,created_at)`,
+		`CREATE TABLE IF NOT EXISTS campaign_senders (
+			campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(campaign_id,mailbox_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaign_senders_mailbox ON campaign_senders(mailbox_id,campaign_id)`,
+		`CREATE TABLE IF NOT EXISTS campaign_recipients (
+			id TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			email TEXT NOT NULL,
+			name TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','queued','delivered','failed','suppressed','canceled')),
+			queue_id TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			queued_at TEXT,
+			delivered_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(campaign_id,email)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaign_recipients_status ON campaign_recipients(campaign_id,status,created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaign_recipients_queue ON campaign_recipients(queue_id) WHERE queue_id<>''`,
+		`CREATE TABLE IF NOT EXISTS campaign_suppressions (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL UNIQUE,
+			reason TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
+			campaign_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaign_suppressions_created ON campaign_suppressions(created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS send_audit_events (
 			id TEXT PRIMARY KEY,
 			queue_id TEXT NOT NULL DEFAULT '',
