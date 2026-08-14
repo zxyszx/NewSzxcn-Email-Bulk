@@ -601,6 +601,15 @@ ensure_update_token() {
   fi
 }
 
+ensure_smtp_relay_secret() {
+  local secret
+  secret="$(env_value LANQIN_SMTP_RELAY_SECRET_KEY || true)"
+  if [[ -z "${secret}" ]]; then
+    set_env LANQIN_SMTP_RELAY_SECRET_KEY "$(random_secret)"
+    chmod 0600 "${INSTALL_DIR}/.env"
+  fi
+}
+
 prepare_directories() {
   install -d -m 0755 "${INSTALL_DIR}/data" "${INSTALL_DIR}/mail" "${INSTALL_DIR}/dkim" "${CERT_DIR}"
   install -d -m 0700 "${INSTALL_DIR}/data/backups"
@@ -1064,7 +1073,7 @@ do_repair_install() {
   fi
   stage_assets
   clear_runtime_image_pin
-  if ! apply_staged_assets || ! ensure_update_token || ! ensure_admin_email_config || ! configure_runtime_bindings; then
+  if ! apply_staged_assets || ! ensure_update_token || ! ensure_smtp_relay_secret || ! ensure_admin_email_config || ! configure_runtime_bindings; then
     if [[ "${snapshot_created}" == "true" ]]; then
       restore_update_snapshot "" false || true
       fail "修复准备失败，已恢复原安装。"
@@ -1125,6 +1134,7 @@ do_install() {
   refresh_assets
   configure_first_install
   ensure_update_token
+  ensure_smtp_relay_secret
   configure_runtime_bindings
   ensure_docker
   configure_firewall
@@ -1374,6 +1384,7 @@ do_restore_backup() {
   if ! (
     refresh_assets
     ensure_update_token
+    ensure_smtp_relay_secret
     ensure_admin_email_config
     configure_runtime_bindings
     ensure_docker
@@ -1418,7 +1429,7 @@ do_update() {
   create_update_snapshot || fail "更新前备份失败，未修改现有安装。"
   stage_assets
   clear_runtime_image_pin
-  if ! apply_staged_assets || ! ensure_update_token || ! ensure_admin_email_config; then
+  if ! apply_staged_assets || ! ensure_update_token || ! ensure_smtp_relay_secret || ! ensure_admin_email_config; then
     restore_update_snapshot "" false || true
     fail "更新文件替换失败，已恢复原安装。"
   fi

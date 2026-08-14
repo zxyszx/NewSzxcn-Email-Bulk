@@ -68,7 +68,7 @@ type sendQueueItem struct {
 }
 
 func (a *App) enqueueSend(ctx context.Context, in sendQueueInput) (string, error) {
-	if strings.TrimSpace(a.config().SMTPHost) == "" {
+	if !a.hasUsableSMTPRoute(ctx) {
 		return "", nil
 	}
 	now := in.Now.UTC()
@@ -150,7 +150,7 @@ func (a *App) sendQueueWorker(ctx context.Context) {
 }
 
 func (a *App) processDueSendQueue(ctx context.Context) error {
-	if strings.TrimSpace(a.config().SMTPHost) == "" {
+	if !a.hasUsableSMTPRoute(ctx) {
 		return nil
 	}
 	if err := a.recoverStaleSendQueueItems(ctx); err != nil {
@@ -262,7 +262,7 @@ func (a *App) processSendQueueItem(ctx context.Context, id string) {
 		}
 		return
 	}
-	if err := a.sendSMTP(item.MailFrom, item.Recipients, item.MIMEBytes); err != nil {
+	if err := a.sendSMTPQueueItem(ctx, item); err != nil {
 		a.markSendQueueFailed(ctx, item, err)
 		return
 	}
@@ -311,17 +311,31 @@ func (a *App) claimSendQueueItem(ctx context.Context, id string) (sendQueueItem,
 
 func (a *App) markSendQueueFailed(ctx context.Context, item sendQueueItem, sendErr error) {
 	now := a.now().UTC()
+	var delayErr *smtpQueueDelayError
+	if errors.As(sendErr, &delayErr) {
+		nextAttempt := delayErr.Until.UTC()
+		if !nextAttempt.After(now) {
+			nextAttempt = now.Add(time.Minute)
+		}
+		_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,attempt_count=CASE WHEN attempt_count>0 THEN attempt_count-1 ELSE 0 END,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?`, sendQueueStatusQueued, nextAttempt.Format(time.RFC3339Nano), delayErr.Error(), now.Format(time.RFC3339Nano), item.ID)
+		if err != nil {
+			a.log.Warn("failed to delay send queue item", "id", item.ID, "error", err)
+		}
+		a.recordSendAudit(ctx, sendAuditRetry, sendQueueStatusQueued, sendAuditInputFromQueue(item, delayErr.Error()))
+		return
+	}
 	status := sendQueueStatusFailed
-	nextAttempt := now.Add(sendRetryDelay(item.AttemptCount))
-	if item.AttemptCount >= item.MaxAttempts {
+	nextAttempt := now.Add(smtpRetryDelay(sendErr, sendRetryDelay(item.AttemptCount)))
+	terminal := !smtpErrorRetrySafe(sendErr)
+	if item.AttemptCount >= item.MaxAttempts || terminal {
 		nextAttempt = now.Add(365 * 24 * time.Hour)
 	}
-	_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?`, status, nextAttempt.Format(time.RFC3339Nano), sendErr.Error(), now.Format(time.RFC3339Nano), item.ID)
+	_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,attempt_count=CASE WHEN ? THEN max_attempts ELSE attempt_count END,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?`, status, terminal, nextAttempt.Format(time.RFC3339Nano), sendErr.Error(), now.Format(time.RFC3339Nano), item.ID)
 	if err != nil {
 		a.log.Warn("failed to mark send queue failed", "id", item.ID, "error", err)
 	}
 	event := sendAuditRetry
-	if item.AttemptCount >= item.MaxAttempts {
+	if item.AttemptCount >= item.MaxAttempts || terminal {
 		event = sendAuditFailed
 	}
 	a.recordSendAudit(ctx, event, status, sendAuditInputFromQueue(item, sendErr.Error()))

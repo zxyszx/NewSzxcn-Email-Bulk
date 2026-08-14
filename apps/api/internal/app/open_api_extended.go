@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -154,8 +156,79 @@ func (a *App) storeDeliveryEvent(r *http.Request, tx *sql.Tx, event deliveryWebh
 		if err := a.enqueueStatusWebhook(r.Context(), tx, "delivery:"+event.Provider+":"+event.ID, "delivery."+event.Status, mailboxID, item); err != nil {
 			return false, err
 		}
+		if err := a.applyCampaignDeliveryEvent(r.Context(), tx, queueID, event.Recipient, event.Status, reason); err != nil {
+			return false, err
+		}
 	}
 	return n > 0, nil
+}
+
+func (a *App) applyCampaignDeliveryEvent(ctx context.Context, tx *sql.Tx, queueID, recipient, status, reason string) error {
+	var recipientID, campaignID string
+	err := tx.QueryRowContext(ctx, `SELECT id,campaign_id FROM campaign_recipients WHERE queue_id=? AND email=?`, queueID, normalizeEmail(recipient)).Scan(&recipientID, &campaignID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	switch status {
+	case "delivered":
+		_, err = tx.ExecContext(ctx, `UPDATE campaign_recipients SET status='delivered',last_error='',delivered_at=COALESCE(delivered_at,?),updated_at=? WHERE id=? AND status NOT IN ('suppressed','canceled')`, now, now, recipientID)
+	case "bounced", "rejected":
+		_, err = tx.ExecContext(ctx, `UPDATE campaign_recipients SET status='failed',last_error=?,updated_at=? WHERE id=? AND status<>'canceled'`, truncateText(reason, 1000), now, recipientID)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO campaign_suppressions(id,email,reason,source,campaign_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET reason=excluded.reason,source=excluded.source,campaign_id=excluded.campaign_id,updated_at=excluded.updated_at`, newID("sup"), normalizeEmail(recipient), firstNonEmpty(reason, "硬退信"), "hard_bounce", campaignID, now, now)
+		}
+	case "complained":
+		_, err = tx.ExecContext(ctx, `UPDATE campaign_recipients SET status='suppressed',last_error=?,updated_at=? WHERE id=? AND status<>'canceled'`, firstNonEmpty(truncateText(reason, 1000), "收件人投诉"), now, recipientID)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO campaign_suppressions(id,email,reason,source,campaign_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET reason=excluded.reason,source=excluded.source,campaign_id=excluded.campaign_id,updated_at=excluded.updated_at`, newID("sup"), normalizeEmail(recipient), firstNonEmpty(reason, "收件人投诉"), "complaint", campaignID, now, now)
+		}
+	case "deferred":
+		_, err = tx.ExecContext(ctx, `UPDATE campaign_recipients SET last_error=?,updated_at=? WHERE id=?`, firstNonEmpty(truncateText(reason, 1000), "对方服务器暂时延迟接收"), now, recipientID)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE campaigns SET pending_count=(SELECT COUNT(1) FROM campaign_recipients WHERE campaign_id=? AND status='pending'),queued_count=(SELECT COUNT(1) FROM campaign_recipients WHERE campaign_id=? AND status='queued'),delivered_count=(SELECT COUNT(1) FROM campaign_recipients WHERE campaign_id=? AND status='delivered'),failed_count=(SELECT COUNT(1) FROM campaign_recipients WHERE campaign_id=? AND status='failed'),suppressed_count=(SELECT COUNT(1) FROM campaign_recipients WHERE campaign_id=? AND status='suppressed'),updated_at=? WHERE id=?`, campaignID, campaignID, campaignID, campaignID, campaignID, now, campaignID); err != nil {
+		return err
+	}
+	settings, err := a.deliverabilitySettingsTx(ctx, tx)
+	if err != nil || !settings.AutoPause {
+		return err
+	}
+	var processed, complaints, bounces int
+	if err := tx.QueryRowContext(ctx, `SELECT
+		COUNT(DISTINCT CASE WHEN de.status IN ('delivered','bounced','rejected','complained') THEN cr.id END),
+		COUNT(DISTINCT CASE WHEN de.status='complained' THEN cr.id END),
+		COUNT(DISTINCT CASE WHEN de.status IN ('bounced','rejected') THEN cr.id END)
+		FROM campaign_recipients cr LEFT JOIN delivery_events de ON de.queue_id=cr.queue_id AND de.recipient=cr.email WHERE cr.campaign_id=?`, campaignID).Scan(&processed, &complaints, &bounces); err != nil {
+		return err
+	}
+	if processed < settings.MinimumSample {
+		return nil
+	}
+	complaintRate, bounceRate := float64(complaints)*100/float64(processed), float64(bounces)*100/float64(processed)
+	pauseReason := ""
+	if complaintRate >= settings.ComplaintThreshold {
+		pauseReason = fmt.Sprintf("投诉率 %.2f%% 已达到 %.2f%%，系统已自动暂停", complaintRate, settings.ComplaintThreshold)
+	} else if bounceRate >= settings.BounceThreshold {
+		pauseReason = fmt.Sprintf("硬退信率 %.2f%% 已达到 %.2f%%，系统已自动暂停", bounceRate, settings.BounceThreshold)
+	}
+	if pauseReason != "" {
+		_, err = tx.ExecContext(ctx, `UPDATE campaigns SET status='paused',pause_reason=?,next_dispatch_at=NULL,updated_at=? WHERE id=? AND status IN ('running','scheduled')`, pauseReason, now, campaignID)
+	}
+	return err
+}
+
+func (a *App) deliverabilitySettingsTx(ctx context.Context, tx *sql.Tx) (DeliverabilitySettings, error) {
+	var item DeliverabilitySettings
+	var enabled int
+	err := tx.QueryRowContext(ctx, `SELECT auto_pause,complaint_threshold,bounce_threshold,minimum_sample,circuit_failure_threshold,circuit_minutes FROM deliverability_settings WHERE id='default'`).Scan(&enabled, &item.ComplaintThreshold, &item.BounceThreshold, &item.MinimumSample, &item.CircuitFailureThreshold, &item.CircuitMinutes)
+	item.AutoPause = enabled == 1
+	return item, err
 }
 
 func validDeliveryEventStatus(status string) bool {

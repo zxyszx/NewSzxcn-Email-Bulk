@@ -123,6 +123,54 @@ func TestCampaignMultiSenderQueuesOneRecipientAndRetriesFailures(t *testing.T) {
 	}
 }
 
+func TestCampaignAcceptsImageOnlyHTMLBody(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	a.updateConfig(func(cfg *Config) {
+		cfg.SMTPHost = "127.0.0.1"
+		cfg.SMTPPort = "1"
+		cfg.PublicBaseURL = "https://mail.example.test"
+	})
+
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	_, mailbox := defaultAdminUserAndMailbox(t, a)
+	var campaign Campaign
+	if code := admin.do("POST", "/api/admin/campaigns", map[string]any{
+		"mailboxIds":       []string{mailbox.ID},
+		"name":             "Image notice",
+		"subject":          "Image only",
+		"text":             "",
+		"html":             `<html><body><img src="https://cdn.example.test/banner.png" alt="Banner"></body></html>`,
+		"ratePerMinute":    30,
+		"consentConfirmed": true,
+		"recipients":       []map[string]string{{"email": "image@example.test"}},
+	}, &campaign); code != http.StatusCreated {
+		t.Fatalf("create campaign code=%d campaign=%+v", code, campaign)
+	}
+
+	var bodyText, bodyHTML string
+	if err := a.db.QueryRow(`SELECT body_text,body_html FROM campaigns WHERE id=?`, campaign.ID).Scan(&bodyText, &bodyHTML); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bodyText, "HTML") {
+		t.Fatalf("image-only HTML did not receive text fallback: %q", bodyText)
+	}
+	if !strings.Contains(bodyHTML, `<img`) || !strings.Contains(bodyHTML, `https://cdn.example.test/banner.png`) {
+		t.Fatalf("campaign HTML image was not preserved: %s", bodyHTML)
+	}
+	withUnsubscribe := appendCampaignUnsubscribeHTML(bodyHTML, "https://mail.example.test/api/unsubscribe?token=test")
+	bodyClose := strings.LastIndex(strings.ToLower(withUnsubscribe), "</body>")
+	unsubscribe := strings.Index(withUnsubscribe, "点击退订")
+	if bodyClose < 0 || unsubscribe < 0 || unsubscribe > bodyClose {
+		t.Fatalf("unsubscribe block was not inserted inside body: %s", withUnsubscribe)
+	}
+}
+
 func TestCampaignDistributesOnlySendableRecipientsAcrossSenders(t *testing.T) {
 	a := newTestApp(t)
 	stopTestWorkers(a)

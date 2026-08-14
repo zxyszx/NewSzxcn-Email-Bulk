@@ -127,10 +127,24 @@ export type CampaignRecipientStatus = "pending" | "queued" | "delivered" | "fail
 export type CampaignSender = { mailboxId: string; address: string; recipientCount: number }
 export type CampaignRecipient = { id: string; email: string; name?: string; mailboxId?: string; status: CampaignRecipientStatus; lastError?: string; queuedAt?: string; deliveredAt?: string }
 export type Campaign = {
-  id: string; mailboxId: string; mailboxAddress: string; senders?: CampaignSender[]; senderCount: number; name: string; subject: string; text?: string; html?: string; status: CampaignStatus; ratePerMinute: number; consentConfirmed: boolean
+  id: string; mailboxId: string; mailboxAddress: string; senders?: CampaignSender[]; senderCount: number; name: string; subject: string; text?: string; html?: string; status: CampaignStatus; pauseReason?: string; ratePerMinute: number; consentConfirmed: boolean
   totalCount: number; pendingCount: number; queuedCount: number; deliveredCount: number; failedCount: number; suppressedCount: number
   scheduledAt?: string; startedAt?: string; completedAt?: string; createdAt: string; updatedAt: string; recipients?: CampaignRecipient[]
 }
+export type SMTPRelay = {
+  id: string; name: string; host: string; port: number; username: string; passwordSet: boolean
+  tlsMode: "plain" | "starttls" | "tls"; enabled: boolean; priority: number
+  minuteLimit: number; dailyLimit: number; domainIds: string[]; mailboxIds: string[]
+  failureCount: number; circuitOpenUntil?: string; lastError?: string; lastSuccessAt?: string
+  minuteUsed: number; dailyUsed: number; createdAt: string; updatedAt: string
+}
+export type SMTPRelayPayload = Omit<SMTPRelay, "id" | "passwordSet" | "failureCount" | "circuitOpenUntil" | "lastError" | "lastSuccessAt" | "minuteUsed" | "dailyUsed" | "createdAt" | "updatedAt"> & { password: string }
+export type DeliverabilitySettings = {
+  autoPause: boolean; complaintThreshold: number; bounceThreshold: number; minimumSample: number
+  circuitFailureThreshold: number; circuitMinutes: number; callbackUrl: string
+  callbackConfigured: boolean; relaySecretConfigured: boolean
+}
+export type DeliverabilitySettingsPayload = Pick<DeliverabilitySettings, "autoPause" | "complaintThreshold" | "bounceThreshold" | "minimumSample" | "circuitFailureThreshold" | "circuitMinutes">
 export type CampaignInput = { mailboxId?: string; mailboxIds: string[]; name: string; subject: string; text: string; html: string; ratePerMinute: number; scheduledAt?: string; consentConfirmed: boolean; recipients: { email: string }[] }
 export type CampaignSuppression = { id: string; email: string; reason: string; source: string; campaignId?: string; createdAt: string; updatedAt: string }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }

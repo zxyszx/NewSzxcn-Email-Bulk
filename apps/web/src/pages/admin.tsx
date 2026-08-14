@@ -1,14 +1,16 @@
 import * as React from "react"
 import DOMPurify from "dompurify"
 import Papa from "papaparse"
+import { type Editor } from "@tiptap/core"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import LinkExtension from "@tiptap/extension-link"
+import ImageExtension from "@tiptap/extension-image"
 import Placeholder from "@tiptap/extension-placeholder"
 import TextAlign from "@tiptap/extension-text-align"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlignCenter, AlignLeft, AlignRight, AlertCircle, Bold, CheckCircle2, ChevronDown, ChevronRight, Circle, ClipboardList, Clock3, Cloud, Copy, Database, Download, Eraser, ExternalLink, Eye, EyeOff, FileUp, Globe2, HardDrive, Italic, KeyRound, Link, List, ListOrdered, Loader2, Mail, Maximize2, Megaphone, Minimize2, MoreHorizontal, Pause, Play, Redo2, RefreshCcw, RotateCcw, Search, Send, ShieldCheck, Strikethrough, Trash2, Underline, Undo2, UserRound, UsersRound, XCircle } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, AlertCircle, Bold, CheckCircle2, ChevronDown, ChevronRight, Circle, ClipboardList, Clock3, Cloud, Copy, Database, Download, Eraser, ExternalLink, Eye, EyeOff, FileUp, Globe2, HardDrive, Image as ImageIcon, Italic, KeyRound, Link, List, ListOrdered, Loader2, Mail, Maximize2, Megaphone, Minimize2, MoreHorizontal, Pause, Pencil, Play, Plus, Redo2, RefreshCcw, RotateCcw, Search, Send, Server, ShieldCheck, Strikethrough, Trash2, Underline, Undo2, UserRound, UsersRound, XCircle } from "lucide-react"
 import { api, AdminOverview, AdminUser, Alias, Campaign, CampaignInput, CampaignRecipient, CampaignSuppression, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -30,7 +32,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import { useMe } from "@/hooks/use-me"
 import { useToast } from "@/hooks/use-toast"
 import { hasAnyPermission, hasPermission } from "@/lib/permissions"
-import type { BackupTransfer, PermissionKey, TelegramPairing } from "@/lib/api-types"
+import type { BackupTransfer, DeliverabilitySettings, PermissionKey, SMTPRelay, SMTPRelayPayload, TelegramPairing } from "@/lib/api-types"
 
 type Section = "overview" | "users" | "permissionGroups" | "domains" | "mailboxes" | "aliases" | "messages" | "sendAudit" | "backups" | "settings"
 type SettingsTab = "base" | "smtp" | "storage" | "mail" | "notifications" | "externalImap" | "templates" | "security"
@@ -1774,6 +1776,8 @@ function SystemSettingsSection({ settings, domains, mailboxes, initialTab }: { s
             <Field name="smtpPassword" label={settings?.smtpPasswordSet ? "中继密码（留空不变）" : "中继密码（内置 Postfix 留空）"} type="password" required={false} />
             <SwitchRow label="外部中继强制 TLS" checked={smtpRequireTls} onCheckedChange={setSmtpRequireTls} className="md:col-span-2" />
           </div>
+          <Separator />
+          <SMTPRelayManager domains={domains} mailboxes={mailboxes} canUpdate={canUpdateSettings} canTest={canTestSMTP} />
         </CardContent>
       </Card>}
 
@@ -2101,6 +2105,162 @@ function TestSMTPDialog({ disabled }: { disabled?: boolean }) {
       </DialogContent>
     </Dialog>
   )
+}
+
+const emptyRelayPayload: SMTPRelayPayload = {
+  name: "", host: "", port: 587, username: "", password: "", tlsMode: "starttls", enabled: true,
+  priority: 100, minuteLimit: 30, dailyLimit: 1000, domainIds: [], mailboxIds: [],
+}
+
+function SMTPRelayManager({ domains, mailboxes, canUpdate, canTest }: { domains: Domain[]; mailboxes: MailboxType[]; canUpdate: boolean; canTest: boolean }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const me = useMe()
+  const relays = useQuery({ queryKey: ["admin", "smtp-relays"], queryFn: api.smtpRelays })
+  const protection = useQuery({ queryKey: ["admin", "deliverability-settings"], queryFn: api.deliverabilitySettings })
+  const [editorOpen, setEditorOpen] = React.useState(false)
+  const [editing, setEditing] = React.useState<SMTPRelay | null>(null)
+  const [relayForm, setRelayForm] = React.useState<SMTPRelayPayload>(emptyRelayPayload)
+  const [deleteTarget, setDeleteTarget] = React.useState<SMTPRelay | null>(null)
+  const [testTarget, setTestTarget] = React.useState<SMTPRelay | null>(null)
+  const [testAddress, setTestAddress] = React.useState("")
+  const [protectionForm, setProtectionForm] = React.useState<DeliverabilitySettings | null>(null)
+  React.useEffect(() => { if (protection.data) setProtectionForm(protection.data) }, [protection.data])
+  React.useEffect(() => { if (!testAddress && me.data?.user.email) setTestAddress(me.data.user.email) }, [me.data?.user.email, testAddress])
+
+  const saveRelay = useMutation({
+    mutationFn: () => editing ? api.updateSmtpRelay(editing.id, relayForm) : api.createSmtpRelay(relayForm),
+    onSuccess: () => {
+      setEditorOpen(false)
+      qc.invalidateQueries({ queryKey: ["admin", "smtp-relays"] })
+      toast({ title: editing ? "中继已更新" : "中继已添加" })
+    },
+    onError: (error) => toast({ title: "保存失败", description: error.message }),
+  })
+  const removeRelay = useMutation({
+    mutationFn: (id: string) => api.deleteSmtpRelay(id),
+    onSuccess: () => {
+      setDeleteTarget(null)
+      qc.invalidateQueries({ queryKey: ["admin", "smtp-relays"] })
+      toast({ title: "中继已删除" })
+    },
+    onError: (error) => toast({ title: "删除失败", description: error.message }),
+  })
+  const testRelay = useMutation({
+    mutationFn: () => api.testSmtpRelay(testTarget!.id, testAddress),
+    onSuccess: () => { setTestTarget(null); toast({ title: "中继测试邮件已发送" }) },
+    onError: (error) => toast({ title: "测试失败", description: error.message }),
+  })
+  const saveProtection = useMutation({
+    mutationFn: () => api.updateDeliverabilitySettings({
+      autoPause: protectionForm!.autoPause,
+      complaintThreshold: protectionForm!.complaintThreshold,
+      bounceThreshold: protectionForm!.bounceThreshold,
+      minimumSample: protectionForm!.minimumSample,
+      circuitFailureThreshold: protectionForm!.circuitFailureThreshold,
+      circuitMinutes: protectionForm!.circuitMinutes,
+    }),
+    onSuccess: (data) => {
+      setProtectionForm(data)
+      qc.invalidateQueries({ queryKey: ["admin", "deliverability-settings"] })
+      toast({ title: "投递保护已保存" })
+    },
+    onError: (error) => toast({ title: "保存失败", description: error.message }),
+  })
+  const openEditor = (relay?: SMTPRelay) => {
+    setEditing(relay || null)
+    setRelayForm(relay ? {
+      name: relay.name, host: relay.host, port: relay.port, username: relay.username, password: "", tlsMode: relay.tlsMode,
+      enabled: relay.enabled, priority: relay.priority, minuteLimit: relay.minuteLimit, dailyLimit: relay.dailyLimit,
+      domainIds: relay.domainIds || [], mailboxIds: relay.mailboxIds || [],
+    } : { ...emptyRelayPayload, domainIds: [], mailboxIds: [] })
+    setEditorOpen(true)
+  }
+  const updateRelayField = <K extends keyof SMTPRelayPayload>(key: K, value: SMTPRelayPayload[K]) => setRelayForm((current) => ({ ...current, [key]: value }))
+  const toggleAssignment = (key: "domainIds" | "mailboxIds", id: string, checked: boolean) => updateRelayField(key, checked ? Array.from(new Set([...relayForm[key], id])) : relayForm[key].filter((item) => item !== id))
+  const assignmentLabel = (relay: SMTPRelay) => {
+    if (relay.mailboxIds.length) return `${relay.mailboxIds.length} 个发件人`
+    if (relay.domainIds.length) return `${relay.domainIds.length} 个域名`
+    return "全部发件人"
+  }
+  return <div className="space-y-5">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div className="flex items-center gap-2 font-semibold"><Server className="h-4 w-4" />中继池</div>
+        <p className="mt-1 text-xs text-muted-foreground">按发件人、域名和优先级自动选择；故障时仅在确认尚未投递的阶段切换。</p>
+      </div>
+      {canUpdate && <Button type="button" size="sm" onClick={() => openEditor()}><Plus className="mr-2 h-4 w-4" />添加中继</Button>}
+    </div>
+    {!protection.data?.relaySecretConfigured && <div className="border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 text-sm">当前环境缺少中继密码加密密钥。使用新版一键安装或更新脚本后会自动生成。</div>}
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader><TableRow><TableHead>中继</TableHead><TableHead>状态</TableHead><TableHead>使用范围</TableHead><TableHead>额度</TableHead><TableHead className="w-32 text-right">操作</TableHead></TableRow></TableHeader>
+        <TableBody>
+          {(relays.data?.items || []).map((relay) => {
+            const circuitOpen = !!relay.circuitOpenUntil && new Date(relay.circuitOpenUntil).getTime() > Date.now()
+            return <TableRow key={relay.id}>
+              <TableCell><div className="font-medium">{relay.name}</div><div className="text-xs text-muted-foreground">{relay.host}:{relay.port} · {relay.tlsMode === "tls" ? "TLS" : relay.tlsMode === "starttls" ? "STARTTLS" : "明文"} · 优先级 {relay.priority}</div></TableCell>
+              <TableCell><Badge variant={!relay.enabled || circuitOpen ? "destructive" : relay.failureCount ? "secondary" : "default"}>{!relay.enabled ? "已停用" : circuitOpen ? "已熔断" : relay.failureCount ? `异常 ${relay.failureCount}` : "可用"}</Badge>{relay.lastError && <div className="mt-1 max-w-64 truncate text-xs text-muted-foreground" title={relay.lastError}>{relay.lastError}</div>}</TableCell>
+              <TableCell className="text-sm">{assignmentLabel(relay)}</TableCell>
+              <TableCell><div className="text-sm">{relay.minuteUsed}/{relay.minuteLimit || "不限"} 分钟</div><div className="text-xs text-muted-foreground">{relay.dailyUsed}/{relay.dailyLimit || "不限"} 今日</div></TableCell>
+              <TableCell><div className="flex justify-end gap-1">
+                {canTest && <Button type="button" variant="ghost" size="icon" title="测试中继" aria-label="测试中继" onClick={() => setTestTarget(relay)}><Send className="h-4 w-4" /></Button>}
+                {canUpdate && <Button type="button" variant="ghost" size="icon" title="编辑中继" aria-label="编辑中继" onClick={() => openEditor(relay)}><Pencil className="h-4 w-4" /></Button>}
+                {canUpdate && <Button type="button" variant="ghost" size="icon" title="删除中继" aria-label="删除中继" onClick={() => setDeleteTarget(relay)}><Trash2 className="h-4 w-4" /></Button>}
+              </div></TableCell>
+            </TableRow>
+          })}
+          {!relays.isPending && !(relays.data?.items || []).length && <TableRow><TableCell colSpan={5} className="h-20 text-center text-muted-foreground">暂无独立中继，仍会使用上方默认发信通道</TableCell></TableRow>}
+        </TableBody>
+      </Table>
+    </div>
+
+    <div className="border-t pt-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div><div className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-4 w-4" />退信与投诉保护</div><p className="mt-1 text-xs text-muted-foreground">硬退信和投诉立即加入全局禁止发送名单；样本达到设定数量后按比例自动暂停活动。</p></div>
+        {canUpdate && <Button type="button" variant="outline" size="sm" disabled={!protectionForm || saveProtection.isPending} onClick={() => saveProtection.mutate()}>{saveProtection.isPending ? "保存中" : "保存保护设置"}</Button>}
+      </div>
+      {protectionForm && <div className="grid gap-4 md:grid-cols-3">
+        <SwitchRow label="超标自动暂停" checked={protectionForm.autoPause} onCheckedChange={(value) => setProtectionForm({ ...protectionForm, autoPause: value })} />
+        <div className="space-y-2"><Label>投诉率阈值（%）</Label><Input type="number" min="0.01" max="10" step="0.01" value={protectionForm.complaintThreshold} onChange={(event) => setProtectionForm({ ...protectionForm, complaintThreshold: Number(event.target.value) })} /></div>
+        <div className="space-y-2"><Label>硬退信率阈值（%）</Label><Input type="number" min="0.1" max="50" step="0.1" value={protectionForm.bounceThreshold} onChange={(event) => setProtectionForm({ ...protectionForm, bounceThreshold: Number(event.target.value) })} /></div>
+        <div className="space-y-2"><Label>最小统计样本</Label><Input type="number" min="1" max="100000" value={protectionForm.minimumSample} onChange={(event) => setProtectionForm({ ...protectionForm, minimumSample: Number(event.target.value) })} /></div>
+        <div className="space-y-2"><Label>连续失败次数</Label><Input type="number" min="1" max="20" value={protectionForm.circuitFailureThreshold} onChange={(event) => setProtectionForm({ ...protectionForm, circuitFailureThreshold: Number(event.target.value) })} /></div>
+        <div className="space-y-2"><Label>熔断时长（分钟）</Label><Input type="number" min="1" max="1440" value={protectionForm.circuitMinutes} onChange={(event) => setProtectionForm({ ...protectionForm, circuitMinutes: Number(event.target.value) })} /></div>
+      </div>}
+      <div className="mt-4 grid gap-2 border-l-2 border-border pl-3 text-xs text-muted-foreground sm:grid-cols-[auto_1fr]">
+        <span>投递回调</span><div className="flex min-w-0 items-center gap-2"><code className="truncate">{protection.data?.callbackUrl || "请先配置外部访问地址"}</code>{protection.data?.callbackUrl && <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="复制回调地址" aria-label="复制回调地址" onClick={() => navigator.clipboard.writeText(protection.data!.callbackUrl)}><Copy className="h-3.5 w-3.5" /></Button>}</div>
+        <span>签名密钥</span><span className={protection.data?.callbackConfigured ? "text-emerald-600" : "text-amber-600"}>{protection.data?.callbackConfigured ? "已配置，可接收送达/退信/投诉事件" : "未配置 LANQIN_DELIVERY_WEBHOOK_SECRET"}</span>
+      </div>
+    </div>
+
+    <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+      <DialogContent className="max-h-[90svh] max-w-3xl overflow-y-auto">
+        <DialogHeader><DialogTitle>{editing ? "编辑 SMTP 中继" : "添加 SMTP 中继"}</DialogTitle></DialogHeader>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2"><Label>名称</Label><Input value={relayForm.name} onChange={(event) => updateRelayField("name", event.target.value)} placeholder="例如：营销线路 A" /></div>
+          <div className="space-y-2"><Label>主机</Label><Input value={relayForm.host} onChange={(event) => updateRelayField("host", event.target.value)} placeholder="smtp.example.com" /></div>
+          <div className="space-y-2"><Label>端口</Label><Input type="number" min="1" max="65535" value={relayForm.port} onChange={(event) => updateRelayField("port", Number(event.target.value))} /></div>
+          <SelectField label="加密方式" value={relayForm.tlsMode} onValueChange={(value) => updateRelayField("tlsMode", value as SMTPRelayPayload["tlsMode"])} items={[["starttls", "STARTTLS（通常 587）"], ["tls", "TLS（通常 465）"], ["plain", "明文（仅可信内网）"]]} />
+          <div className="space-y-2"><Label>用户名</Label><Input value={relayForm.username} onChange={(event) => updateRelayField("username", event.target.value)} /></div>
+          <div className="space-y-2"><Label>{editing?.passwordSet ? "密码（留空不变）" : "密码"}</Label><Input type="password" value={relayForm.password} onChange={(event) => updateRelayField("password", event.target.value)} /></div>
+          <div className="space-y-2"><Label>优先级</Label><Input type="number" min="1" max="9999" value={relayForm.priority} onChange={(event) => updateRelayField("priority", Number(event.target.value))} /><div className="text-xs text-muted-foreground">数字越小越优先。</div></div>
+          <SwitchRow label="启用此中继" checked={relayForm.enabled} onCheckedChange={(value) => updateRelayField("enabled", value)} />
+          <div className="space-y-2"><Label>每分钟额度</Label><Input type="number" min="0" value={relayForm.minuteLimit} onChange={(event) => updateRelayField("minuteLimit", Number(event.target.value))} /><div className="text-xs text-muted-foreground">填 0 表示不限额。</div></div>
+          <div className="space-y-2"><Label>每日额度</Label><Input type="number" min="0" value={relayForm.dailyLimit} onChange={(event) => updateRelayField("dailyLimit", Number(event.target.value))} /><div className="text-xs text-muted-foreground">按 UTC 自然日统计，填 0 表示不限额。</div></div>
+        </div>
+        <div className="grid gap-4 border-t pt-4 md:grid-cols-2">
+          <div><Label>指定域名</Label><p className="mb-2 text-xs text-muted-foreground">不选择域名和发件人时，对全部发件人可用。</p><div className="max-h-40 space-y-1 overflow-y-auto">{domains.map((domain) => <label key={domain.id} className="flex items-center gap-2 py-1 text-sm"><Checkbox checked={relayForm.domainIds.includes(domain.id)} onCheckedChange={(value) => toggleAssignment("domainIds", domain.id, value === true)} />{domain.name}</label>)}</div></div>
+          <div><Label>指定发件人</Label><p className="mb-2 text-xs text-muted-foreground">发件人指定优先于域名指定。</p><div className="max-h-40 space-y-1 overflow-y-auto">{mailboxes.filter((item) => item.status === "active").map((mailbox) => <label key={mailbox.id} className="flex items-center gap-2 py-1 text-sm"><Checkbox checked={relayForm.mailboxIds.includes(mailbox.id)} onCheckedChange={(value) => toggleAssignment("mailboxIds", mailbox.id, value === true)} />{mailbox.address}</label>)}</div></div>
+        </div>
+        <DialogFooter><Button type="button" variant="outline" onClick={() => setEditorOpen(false)}>取消</Button><Button type="button" disabled={saveRelay.isPending || !relayForm.name || !relayForm.host || (!editing && !relayForm.password)} onClick={() => saveRelay.mutate()}>{saveRelay.isPending ? "保存中" : "保存中继"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={!!testTarget} onOpenChange={(open) => { if (!open) setTestTarget(null) }}>
+      <DialogContent><DialogHeader><DialogTitle>测试 {testTarget?.name}</DialogTitle></DialogHeader><div className="space-y-2"><Label>收件邮箱</Label><Input type="email" value={testAddress} onChange={(event) => setTestAddress(event.target.value)} /></div><DialogFooter><Button type="button" disabled={testRelay.isPending || !testAddress} onClick={() => testRelay.mutate()}>{testRelay.isPending ? "发送中" : "发送测试邮件"}</Button></DialogFooter></DialogContent>
+    </Dialog>
+    <ConfirmDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }} title="删除这个 SMTP 中继？" description="删除后，绑定到它的发件人会自动改用其他可用中继或默认通道。" confirmText="删除中继" destructive pending={removeRelay.isPending} onConfirm={() => deleteTarget && removeRelay.mutate(deleteTarget.id)} />
+  </div>
 }
 
 function MailTemplatesPanel({ templates, loading, canUpdate, canReset }: { templates: MailTemplate[]; loading: boolean; canUpdate: boolean; canReset: boolean }) {
@@ -2613,6 +2773,7 @@ const dnsCheckMeta: Record<string, { label: string; description: string }> = {
   spf: { label: "SPF", description: "发信授权" },
   dkim: { label: "DKIM", description: "邮件签名" },
   dmarc: { label: "DMARC", description: "防伪策略" },
+  ptr: { label: "PTR", description: "反向 DNS" },
 }
 
 function DNSCheckPending() {
@@ -2631,7 +2792,7 @@ function DNSCheckFailure({ error }: { error: Error }) {
 
 function DNSCheckSummary({ checks }: { checks: Record<string, { ok: boolean; message: string; found?: string[] }> }) {
   const entries = Object.entries(checks).sort(([left], [right]) => {
-    const order = ["mx", "spf", "dkim", "dmarc"]
+    const order = ["mx", "spf", "dkim", "dmarc", "ptr"]
     return order.indexOf(left) - order.indexOf(right)
   })
   const passed = entries.filter(([, item]) => item.ok).length
@@ -2649,7 +2810,7 @@ function DNSCheckSummary({ checks }: { checks: Record<string, { ok: boolean; mes
         <p className="mt-1 text-sm text-muted-foreground">{allPassed ? "所有邮件相关记录均已正确解析，可以正常使用。" : "请处理下面标红的项目，修改 DNS 后再重新检测。"}</p>
       </div>
     </div>
-    <div className="mt-3 grid gap-x-4 sm:grid-cols-2 md:grid-cols-4">
+    <div className="mt-3 grid gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
       {entries.map(([name, item]) => <DNSCheckRow key={name} name={name} check={item} />)}
     </div>
   </section>
@@ -2924,7 +3085,7 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
     onSuccess: async (item) => { await qc.invalidateQueries({ queryKey: ["admin", "campaigns"] }); toast({ title: item.status === "draft" ? "草稿已保存" : item.status === "scheduled" ? "活动已设置定时发送" : "活动已启动" }); onOpenChange(false); setName(""); setSubject(""); setBody({ text: "", html: "" }); setRecipientText(""); setScheduledAt(""); setConsent(false) },
     onError: (error) => toast({ title: "保存失败", description: error.message }),
   })
-  const ready = mailboxIds.length > 0 && name.trim() && subject.trim() && body.text.trim() && parsed.items.length > 0
+  const ready = mailboxIds.length > 0 && name.trim() && subject.trim() && campaignHtmlContainsMeaningfulContent(body.html, body.text) && parsed.items.length > 0
   const visibleMailboxes = sendersExpanded ? mailboxes : mailboxes.slice(0, 4)
   const senderAllocation = (mailboxID: string) => {
     const index = mailboxIds.indexOf(mailboxID)
@@ -2984,11 +3145,13 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
 }
 
 function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { value: { text: string; html: string }; expanded: boolean; onExpandedChange: (expanded: boolean) => void; onChange: (value: { text: string; html: string }) => void }) {
-  const [viewMode, setViewMode] = React.useState<"content" | "preview">("content")
+  const [viewMode, setViewMode] = React.useState<"content" | "preview" | "html">("content")
+  const [insertImage, setInsertImage] = React.useState<CampaignInsertImageState | null>(null)
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false }),
       LinkExtension.configure({ openOnClick: false, HTMLAttributes: { target: "_blank", rel: "noopener noreferrer" } }),
+      ImageExtension.configure({ allowBase64: true, HTMLAttributes: { style: "max-width:100%;height:auto;margin:12px 0;" } }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Placeholder.configure({ placeholder: "输入邮件正文，退订链接会自动添加到末尾。" }),
     ],
@@ -3002,8 +3165,8 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
     },
     onUpdate({ editor: current }) {
       const text = current.getText({ blockSeparator: "\n" }).replace(/\u00a0/g, " ").trimEnd()
-      const html = DOMPurify.sanitize(current.getHTML())
-      onChange({ text, html: text.trim() ? html : "" })
+      const html = sanitizeCampaignHtml(current.getHTML())
+      onChange({ text, html: campaignHtmlContainsMeaningfulContent(html, text) ? html : "" })
     },
   })
 
@@ -3019,10 +3182,33 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
     editor.chain().focus().extendMarkRange("link").setLink({ href }).run()
   }
 
+  function openImageDialog() {
+    if (!editor) return
+    const attrs = campaignSelectedImageAttributes(editor)
+    setInsertImage({ url: attrs?.src || "", alt: attrs?.alt || "", editing: Boolean(attrs?.src) })
+  }
+
+  function confirmImage(value: { url: string; alt: string }) {
+    if (!editor || !insertImage) return
+    const url = normalizeCampaignImageUrl(value.url)
+    if (!url) return
+    if (insertImage.editing) {
+      editor.chain().focus().updateAttributes("image", { src: url, alt: value.alt.trim() }).run()
+      return
+    }
+    editor.chain().focus().setImage({ src: url, alt: value.alt.trim() }).run()
+  }
+
+  function updateRawHTML(raw: string) {
+    const html = sanitizeCampaignHtml(raw)
+    const text = campaignHtmlToText(html).trimEnd()
+    onChange({ text, html: campaignHtmlContainsMeaningfulContent(html, text) ? html : "" })
+  }
+
   return <div className="overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
     <div className="flex h-10 items-stretch justify-between gap-2 border-b px-2">
       <div className="flex items-stretch" aria-label="群发正文视图">
-        {([['content', '内容'], ['preview', '预览']] as const).map(([mode, label]) => (
+        {([['content', '内容'], ['preview', '预览'], ['html', 'HTML']] as const).map(([mode, label]) => (
           <Button key={mode} type="button" variant="ghost" size="sm" className={cn("relative h-10 rounded-none px-3 font-medium text-muted-foreground hover:bg-transparent hover:text-foreground", viewMode === mode && "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-foreground")} aria-pressed={viewMode === mode} onMouseDown={(event) => event.preventDefault()} onClick={() => setViewMode(mode)}>{label}</Button>
         ))}
       </div>
@@ -3043,6 +3229,7 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
       <CampaignToolbarButton label="下划线" active={editor?.isActive("underline")} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline /></CampaignToolbarButton>
       <CampaignToolbarButton label="删除线" active={editor?.isActive("strike")} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough /></CampaignToolbarButton>
       <CampaignToolbarButton label="链接" active={editor?.isActive("link")} disabled={!editor} onClick={toggleLink}><Link /></CampaignToolbarButton>
+      <CampaignToolbarButton label="图片链接" active={editor?.isActive("image")} disabled={!editor} onClick={openImageDialog}><ImageIcon /></CampaignToolbarButton>
       <Separator orientation="vertical" className="mx-0.5 h-6" />
       <CampaignToolbarButton label="无序列表" active={editor?.isActive("bulletList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List /></CampaignToolbarButton>
       <CampaignToolbarButton label="有序列表" active={editor?.isActive("orderedList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered /></CampaignToolbarButton>
@@ -3051,14 +3238,87 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
       <CampaignToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight /></CampaignToolbarButton>
     </div>}
     <div className="max-h-[220px] min-h-[160px] overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1 [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6">
-      <EditorContent editor={editor} className={cn(viewMode === "preview" && "hidden")} />
-      {viewMode === "preview" && <div className="mail-html min-h-full px-3 py-3 text-sm leading-6 [overflow-wrap:anywhere]" aria-label="群发邮件预览" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(editor?.getHTML() || "") || "<p></p>" }} />}
+      <EditorContent editor={editor} className={cn(viewMode !== "content" && "hidden")} />
+      {viewMode === "preview" && <div className="mail-html min-h-full px-3 py-3 text-sm leading-6 [overflow-wrap:anywhere]" aria-label="群发邮件预览" dangerouslySetInnerHTML={{ __html: sanitizeCampaignHtml(value.html || editor?.getHTML() || "") || "<p></p>" }} />}
+      {viewMode === "html" && <Textarea className="min-h-full resize-none rounded-none border-0 px-3 py-3 font-mono text-xs leading-5 shadow-none focus-visible:ring-0" aria-label="群发 HTML 源码" value={value.html} onChange={(event) => updateRawHTML(event.target.value)} placeholder="<h1>标题</h1><p>正文</p><img src=&quot;https://example.com/banner.jpg&quot; alt=&quot;&quot;>" />}
     </div>
+    <CampaignInsertImageDialog state={insertImage} onOpenChange={(open) => { if (!open) setInsertImage(null) }} onConfirm={confirmImage} />
   </div>
 }
 
 function CampaignToolbarButton({ label, active, disabled, onClick, children }: { label: string; active?: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
   return <Button type="button" size="icon" variant={active ? "secondary" : "ghost"} className="h-8 w-8 shrink-0 [&_svg]:h-4 [&_svg]:w-4" title={label} aria-label={label} aria-pressed={active || undefined} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>{children}</Button>
+}
+
+type CampaignInsertImageState = { url: string; alt: string; editing: boolean }
+
+function CampaignInsertImageDialog({ state, onOpenChange, onConfirm }: { state: CampaignInsertImageState | null; onOpenChange: (open: boolean) => void; onConfirm: (value: { url: string; alt: string }) => void }) {
+  const [url, setUrl] = React.useState("")
+  const [alt, setAlt] = React.useState("")
+
+  React.useEffect(() => {
+    if (!state) return
+    setUrl(state.url)
+    setAlt(state.alt)
+  }, [state])
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!normalizeCampaignImageUrl(url)) return
+    onConfirm({ url, alt })
+    onOpenChange(false)
+  }
+
+  return <Dialog open={!!state} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-md">
+      <form className="grid gap-4" onSubmit={submit}>
+        <DialogHeader><DialogTitle>{state?.editing ? "编辑图片" : "插入图片"}</DialogTitle></DialogHeader>
+        <div className="grid gap-2">
+          <Label htmlFor="campaign-image-url">图片地址</Label>
+          <Input id="campaign-image-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/banner.jpg" autoFocus />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="campaign-image-alt">替代文字</Label>
+          <Input id="campaign-image-alt" value={alt} onChange={(event) => setAlt(event.target.value)} placeholder="图片说明" />
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button type="submit">{state?.editing ? "更新" : "插入"}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+}
+
+function campaignSelectedImageAttributes(editor: Editor) {
+  const attrs = editor.getAttributes("image") as { src?: string; alt?: string }
+  return attrs.src ? attrs : null
+}
+
+function normalizeCampaignImageUrl(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  return /^(https?:|cid:|data:image\/|\/)/i.test(trimmed) ? trimmed : `https://${trimmed}`
+}
+
+function sanitizeCampaignHtml(value: string) {
+  const raw = value || ""
+  return DOMPurify.sanitize(raw, {
+    ADD_ATTR: ["style", "type", "align", "valign", "bgcolor", "border", "cellpadding", "cellspacing", "width", "height", "target", "rel"],
+    ADD_TAGS: ["html", "head", "body", "style", "center", "font"],
+    WHOLE_DOCUMENT: /<html[\s>]/i.test(raw) || /<body[\s>]/i.test(raw),
+  })
+}
+
+function campaignHtmlToText(html: string) {
+  if (typeof document === "undefined") return html.replace(/<[^>]*>/g, " ")
+  const div = document.createElement("div")
+  div.innerHTML = sanitizeCampaignHtml(html)
+  return div.textContent || div.innerText || ""
+}
+
+function campaignHtmlContainsMeaningfulContent(html: string, text = "") {
+  return text.trim().length > 0 || /<(img|hr|table|ul|ol|li|blockquote|pre|div)[\s>]/i.test(html)
 }
 
 function parseCampaignRecipients(raw: string): { items: { email: string }[]; duplicates: number; invalid: number } {
@@ -3102,15 +3362,15 @@ function CampaignDetailDialog({ id, open, onOpenChange, canManage }: { id: strin
   const detail = useQuery({ queryKey: ["admin", "campaign", id], queryFn: () => api.campaign(id), enabled: open && !!id, refetchInterval: open ? 4000 : false })
   React.useEffect(() => { setSelected(new Set()); setRetryAll(false) }, [id, tab])
   const recipients = detail.data?.recipients || []
-  const filtered = recipients.filter((recipient) => tab === "sending" ? recipient.status === "pending" || recipient.status === "queued" : recipient.status === tab)
+  const filtered = recipients.filter((recipient) => tab === "sending" ? recipient.status === "pending" || recipient.status === "queued" : tab === "failed" ? recipient.status === "failed" || recipient.status === "suppressed" : recipient.status === tab)
   const failedIDs = filtered.filter((recipient) => recipient.status === "failed").map((recipient) => recipient.id)
   const retry = useMutation({ mutationFn: () => api.retryCampaignRecipients(id, retryAll ? [] : [...selected]), onSuccess: async (result) => { setSelected(new Set()); setRetryAll(false); await Promise.all([qc.invalidateQueries({ queryKey: ["admin", "campaign", id] }), qc.invalidateQueries({ queryKey: ["admin", "campaigns"] })]); toast({ title: `已重新加入 ${result.retried} 位收件人` }) }, onError: (error) => toast({ title: "重新发送失败", description: error.message }) })
   const allSelected = retryAll || (failedIDs.length > 0 && failedIDs.every((recipientID) => selected.has(recipientID)))
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="flex max-h-[90svh] max-w-5xl flex-col overflow-hidden p-0"><DialogHeader className="border-b px-5 py-4"><DialogTitle>{detail.data?.name || "活动明细"}</DialogTitle></DialogHeader>{detail.isPending ? <div className="p-5"><Skeleton className="h-72 w-full" /></div> : detail.data && <><div className="space-y-3 border-b px-5 py-4"><div className="flex flex-wrap items-center gap-2"><CampaignStatusBadge status={detail.data.status} /><span className="text-sm text-muted-foreground">{detail.data.subject}</span><span className="ml-auto text-sm text-muted-foreground">{detail.data.ratePerMinute} 封/分钟</span></div><CampaignProgress item={detail.data} /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{detail.data.senders?.map((sender) => <div key={sender.mailboxId} className="rounded-md border px-3 py-2"><div className="truncate text-sm font-medium">{sender.address}</div><div className="text-xs text-muted-foreground">分配 {sender.recipientCount} 位</div></div>)}</div></div><div className="flex items-center gap-1 border-b px-5 py-2">{(["sending", "delivered", "failed"] as RecipientTab[]).map((item) => <Button key={item} type="button" size="sm" variant={tab === item ? "secondary" : "ghost"} onClick={() => setTab(item)}>{item === "sending" ? `发送中 ${detail.data!.pendingCount + detail.data!.queuedCount}` : item === "delivered" ? `发送完成 ${detail.data!.deliveredCount}` : `发送失败 ${detail.data!.failedCount}`}</Button>)}{tab === "failed" && canManage && failedIDs.length > 0 && <Button type="button" size="sm" className="ml-auto" disabled={(!retryAll && selected.size === 0) || retry.isPending} onClick={() => retry.mutate()}><RotateCcw className="mr-2 h-4 w-4" />{retryAll ? `重新发送全部 (${detail.data.failedCount})` : `重新发送所选 (${selected.size})`}</Button>}</div><ScrollArea className="min-h-0 flex-1"><div className="p-5">{filtered.length === 0 ? <div className="grid min-h-40 place-items-center text-sm text-muted-foreground">当前没有记录</div> : <div className="overflow-hidden rounded-md border"><Table><TableHeader><TableRow>{tab === "failed" && <TableHead className="w-12"><Checkbox checked={allSelected} aria-label="全选失败收件人" onCheckedChange={(checked) => { const value = checked === true; setRetryAll(value); setSelected(value ? new Set(failedIDs) : new Set()) }} /></TableHead>}<TableHead>收件人</TableHead><TableHead>发件人</TableHead><TableHead>状态</TableHead><TableHead>时间 / 原因</TableHead></TableRow></TableHeader><TableBody>{filtered.map((recipient) => <CampaignRecipientRow key={recipient.id} recipient={recipient} sender={detail.data!.senders?.find((sender) => sender.mailboxId === recipient.mailboxId)?.address || "-"} selectable={tab === "failed"} selected={retryAll || selected.has(recipient.id)} onSelected={(checked) => { setRetryAll(false); setSelected((current) => { const next = new Set(current); if (checked) next.add(recipient.id); else next.delete(recipient.id); return next }) }} />)}</TableBody></Table></div>}</div></ScrollArea></>}</DialogContent></Dialog>
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="flex max-h-[90svh] max-w-5xl flex-col overflow-hidden p-0"><DialogHeader className="border-b px-5 py-4"><DialogTitle>{detail.data?.name || "活动明细"}</DialogTitle></DialogHeader>{detail.isPending ? <div className="p-5"><Skeleton className="h-72 w-full" /></div> : detail.data && <><div className="space-y-3 border-b px-5 py-4"><div className="flex flex-wrap items-center gap-2"><CampaignStatusBadge status={detail.data.status} /><span className="text-sm text-muted-foreground">{detail.data.subject}</span><span className="ml-auto text-sm text-muted-foreground">{detail.data.ratePerMinute} 封/分钟</span></div>{detail.data.pauseReason && <div className="border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 text-sm text-amber-800">{detail.data.pauseReason}</div>}<CampaignProgress item={detail.data} /><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{detail.data.senders?.map((sender) => <div key={sender.mailboxId} className="rounded-md border px-3 py-2"><div className="truncate text-sm font-medium">{sender.address}</div><div className="text-xs text-muted-foreground">分配 {sender.recipientCount} 位</div></div>)}</div></div><div className="flex items-center gap-1 border-b px-5 py-2">{(["sending", "delivered", "failed"] as RecipientTab[]).map((item) => <Button key={item} type="button" size="sm" variant={tab === item ? "secondary" : "ghost"} onClick={() => setTab(item)}>{item === "sending" ? `发送中 ${detail.data!.pendingCount + detail.data!.queuedCount}` : item === "delivered" ? `发送完成 ${detail.data!.deliveredCount}` : `发送失败 ${detail.data!.failedCount + detail.data!.suppressedCount}`}</Button>)}{tab === "failed" && canManage && failedIDs.length > 0 && <Button type="button" size="sm" className="ml-auto" disabled={(!retryAll && selected.size === 0) || retry.isPending} onClick={() => retry.mutate()}><RotateCcw className="mr-2 h-4 w-4" />{retryAll ? `重新发送全部 (${detail.data.failedCount})` : `重新发送所选 (${selected.size})`}</Button>}</div><ScrollArea className="min-h-0 flex-1"><div className="p-5">{filtered.length === 0 ? <div className="grid min-h-40 place-items-center text-sm text-muted-foreground">当前没有记录</div> : <div className="overflow-hidden rounded-md border"><Table><TableHeader><TableRow>{tab === "failed" && <TableHead className="w-12"><Checkbox checked={allSelected} aria-label="全选失败收件人" onCheckedChange={(checked) => { const value = checked === true; setRetryAll(value); setSelected(value ? new Set(failedIDs) : new Set()) }} /></TableHead>}<TableHead>收件人</TableHead><TableHead>发件人</TableHead><TableHead>状态</TableHead><TableHead>时间 / 原因</TableHead></TableRow></TableHeader><TableBody>{filtered.map((recipient) => <CampaignRecipientRow key={recipient.id} recipient={recipient} sender={detail.data!.senders?.find((sender) => sender.mailboxId === recipient.mailboxId)?.address || "-"} selectable={tab === "failed" && recipient.status === "failed"} selected={retryAll || selected.has(recipient.id)} onSelected={(checked) => { setRetryAll(false); setSelected((current) => { const next = new Set(current); if (checked) next.add(recipient.id); else next.delete(recipient.id); return next }) }} />)}</TableBody></Table></div>}</div></ScrollArea></>}</DialogContent></Dialog>
 }
 
 function CampaignRecipientRow({ recipient, sender, selectable, selected, onSelected }: { recipient: CampaignRecipient; sender: string; selectable: boolean; selected: boolean; onSelected: (checked: boolean) => void }) {
-  return <TableRow>{selectable && <TableCell><Checkbox checked={selected} aria-label={`选择 ${recipient.email}`} onCheckedChange={(checked) => onSelected(checked === true)} /></TableCell>}<TableCell><div className="font-medium">{recipient.email}</div>{recipient.name && <div className="text-xs text-muted-foreground">{recipient.name}</div>}</TableCell><TableCell className="max-w-48 truncate text-xs" title={sender}>{sender}</TableCell><TableCell><Badge variant={recipient.status === "delivered" ? "default" : recipient.status === "failed" ? "destructive" : "outline"}>{recipient.status === "delivered" ? "发送完成" : recipient.status === "failed" ? "发送失败" : "发送中"}</Badge></TableCell><TableCell className="max-w-72 text-xs text-muted-foreground">{recipient.lastError || (recipient.deliveredAt ? formatDate(recipient.deliveredAt) : recipient.queuedAt ? formatDate(recipient.queuedAt) : "等待发送")}</TableCell></TableRow>
+  return <TableRow>{selectable ? <TableCell><Checkbox checked={selected} aria-label={`选择 ${recipient.email}`} onCheckedChange={(checked) => onSelected(checked === true)} /></TableCell> : recipient.status === "suppressed" ? <TableCell /> : null}<TableCell><div className="font-medium">{recipient.email}</div>{recipient.name && <div className="text-xs text-muted-foreground">{recipient.name}</div>}</TableCell><TableCell className="max-w-48 truncate text-xs" title={sender}>{sender}</TableCell><TableCell><Badge variant={recipient.status === "delivered" ? "default" : recipient.status === "failed" || recipient.status === "suppressed" ? "destructive" : "outline"}>{recipient.status === "delivered" ? "发送完成" : recipient.status === "suppressed" ? "已禁止发送" : recipient.status === "failed" ? "发送失败" : "发送中"}</Badge></TableCell><TableCell className="max-w-72 text-xs text-muted-foreground">{recipient.lastError || (recipient.deliveredAt ? formatDate(recipient.deliveredAt) : recipient.queuedAt ? formatDate(recipient.queuedAt) : "等待发送")}</TableCell></TableRow>
 }
 
 function CampaignSuppressions({ items, loading, canManage }: { items: CampaignSuppression[]; loading: boolean; canManage: boolean }) {
@@ -3120,5 +3380,5 @@ function CampaignSuppressions({ items, loading, canManage }: { items: CampaignSu
   const [reason, setReason] = React.useState("")
   const add = useMutation({ mutationFn: () => api.createCampaignSuppression({ email, reason }), onSuccess: async () => { setEmail(""); setReason(""); await qc.invalidateQueries({ queryKey: ["admin", "campaign-suppressions"] }); toast({ title: "已加入退订名单" }) }, onError: (error) => toast({ title: "添加失败", description: error.message }) })
   const remove = useMutation({ mutationFn: api.deleteCampaignSuppression, onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["admin", "campaign-suppressions"] }); toast({ title: "已移出退订名单" }) }, onError: (error) => toast({ title: "移除失败", description: error.message }) })
-  return <div className="space-y-3">{canManage && <div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(220px,1fr)_minmax(240px,1.5fr)_auto]"><Input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱地址" aria-label="退订邮箱地址" /><Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="原因（可选）" aria-label="加入退订名单的原因" /><Button type="button" disabled={!email.trim() || add.isPending} onClick={() => add.mutate()}>加入名单</Button></div>}{loading ? <Skeleton className="h-64 w-full" /> : <div className="overflow-hidden rounded-lg border"><Table><TableHeader><TableRow><TableHead>邮箱地址</TableHead><TableHead>来源</TableHead><TableHead>原因</TableHead><TableHead>加入时间</TableHead>{canManage && <TableHead className="w-16" />}</TableRow></TableHeader><TableBody>{items.map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.email}</TableCell><TableCell>{item.source === "unsubscribe" ? "主动退订" : "手动添加"}</TableCell><TableCell>{item.reason}</TableCell><TableCell>{formatDate(item.createdAt)}</TableCell>{canManage && <TableCell><Button type="button" size="icon" variant="ghost" className="text-destructive" aria-label={`移出 ${item.email}`} title="移出名单" onClick={() => remove.mutate(item.id)}><Trash2 className="h-4 w-4" /></Button></TableCell>}</TableRow>)}{items.length === 0 && <TableRow><TableCell colSpan={canManage ? 5 : 4} className="h-36 text-center text-muted-foreground">退订名单为空</TableCell></TableRow>}</TableBody></Table></div>}</div>
+  return <div className="space-y-3">{canManage && <div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(220px,1fr)_minmax(240px,1.5fr)_auto]"><Input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱地址" aria-label="退订邮箱地址" /><Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="原因（可选）" aria-label="加入退订名单的原因" /><Button type="button" disabled={!email.trim() || add.isPending} onClick={() => add.mutate()}>加入名单</Button></div>}{loading ? <Skeleton className="h-64 w-full" /> : <div className="overflow-hidden rounded-lg border"><Table><TableHeader><TableRow><TableHead>邮箱地址</TableHead><TableHead>来源</TableHead><TableHead>原因</TableHead><TableHead>加入时间</TableHead>{canManage && <TableHead className="w-16" />}</TableRow></TableHeader><TableBody>{items.map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.email}</TableCell><TableCell>{item.source === "unsubscribe" ? "主动退订" : item.source === "complaint" ? "收件人投诉" : item.source === "hard_bounce" ? "硬退信" : "手动添加"}</TableCell><TableCell>{item.reason}</TableCell><TableCell>{formatDate(item.createdAt)}</TableCell>{canManage && <TableCell><Button type="button" size="icon" variant="ghost" className="text-destructive" aria-label={`移出 ${item.email}`} title="移出名单" onClick={() => remove.mutate(item.id)}><Trash2 className="h-4 w-4" /></Button></TableCell>}</TableRow>)}{items.length === 0 && <TableRow><TableCell colSpan={canManage ? 5 : 4} className="h-36 text-center text-muted-foreground">退订名单为空</TableCell></TableRow>}</TableBody></Table></div>}</div>
 }

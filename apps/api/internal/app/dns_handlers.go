@@ -75,6 +75,31 @@ func (a *App) checkDNS(ctx context.Context, d *Domain) DNSCheckResult {
 	dmarcTXT, _ := resolver.LookupTXT(ctx, "_dmarc."+d.Name)
 	checks["dmarc"] = txtContains(dmarcTXT, "v=DMARC1", "DMARC 记录存在", "未找到 DMARC 记录")
 
+	hostname := strings.TrimSuffix(a.config().PublicHostname, ".")
+	addresses, lookupErr := resolver.LookupHost(ctx, hostname)
+	ptrFound := []string{}
+	ptrOK := false
+	if lookupErr == nil {
+		for _, address := range addresses {
+			names, err := resolver.LookupAddr(ctx, address)
+			if err != nil {
+				continue
+			}
+			for _, name := range names {
+				name = strings.TrimSuffix(name, ".")
+				ptrFound = append(ptrFound, address+" → "+name)
+				if strings.EqualFold(name, hostname) {
+					ptrOK = true
+				}
+			}
+		}
+	}
+	ptrMessage := "未找到与邮件主机一致的 PTR；请联系服务器商设置反向 DNS，并确认 A 记录未开启代理"
+	if ptrOK {
+		ptrMessage = "PTR 与邮件主机正反向一致"
+	}
+	checks["ptr"] = DNSCheckStatus{OK: ptrOK, Message: ptrMessage, Found: ptrFound}
+
 	status := "ok"
 	for _, c := range checks {
 		if !c.OK {

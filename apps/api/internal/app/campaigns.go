@@ -47,6 +47,7 @@ type Campaign struct {
 	BodyText         string              `json:"text,omitempty"`
 	BodyHTML         string              `json:"html,omitempty"`
 	Status           string              `json:"status"`
+	PauseReason      string              `json:"pauseReason,omitempty"`
 	RatePerMinute    int                 `json:"ratePerMinute"`
 	ConsentConfirmed bool                `json:"consentConfirmed"`
 	TotalCount       int                 `json:"totalCount"`
@@ -272,6 +273,9 @@ func (a *App) normalizeCampaignInput(ctx context.Context, req campaignInput) (no
 	if strings.TrimSpace(out.HTML) == "" {
 		out.HTML = "<p>" + htmlEscape(out.Text) + "</p>"
 	}
+	if strings.TrimSpace(out.Text) == "" && campaignHTMLHasNonTextContent(out.HTML) {
+		out.Text = "此邮件包含图片或 HTML 内容，请使用支持 HTML 的邮件客户端查看。"
+	}
 	if strings.TrimSpace(out.Text) == "" {
 		return out, errors.New("邮件正文不能为空")
 	}
@@ -410,7 +414,7 @@ func (a *App) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, item)
 }
 
-const campaignSelect = `SELECT c.id,c.mailbox_id,mb.address,(SELECT COUNT(1) FROM campaign_senders cs WHERE cs.campaign_id=c.id),c.name,c.subject,c.body_text,c.body_html,c.status,c.rate_per_minute,c.consent_confirmed,c.total_count,c.pending_count,c.queued_count,c.delivered_count,c.failed_count,c.suppressed_count,c.scheduled_at,c.started_at,c.completed_at,c.created_at,c.updated_at FROM campaigns c JOIN mailboxes mb ON mb.id=c.mailbox_id`
+const campaignSelect = `SELECT c.id,c.mailbox_id,mb.address,(SELECT COUNT(1) FROM campaign_senders cs WHERE cs.campaign_id=c.id),c.name,c.subject,c.body_text,c.body_html,c.status,c.pause_reason,c.rate_per_minute,c.consent_confirmed,c.total_count,c.pending_count,c.queued_count,c.delivered_count,c.failed_count,c.suppressed_count,c.scheduled_at,c.started_at,c.completed_at,c.created_at,c.updated_at FROM campaigns c JOIN mailboxes mb ON mb.id=c.mailbox_id`
 
 type campaignScanner interface{ Scan(dest ...any) error }
 
@@ -419,7 +423,7 @@ func scanCampaign(row campaignScanner) (Campaign, error) {
 	var consent int
 	var scheduled, started, completed sql.NullString
 	var created, updated string
-	err := row.Scan(&item.ID, &item.MailboxID, &item.MailboxAddress, &item.SenderCount, &item.Name, &item.Subject, &item.BodyText, &item.BodyHTML, &item.Status, &item.RatePerMinute, &consent, &item.TotalCount, &item.PendingCount, &item.QueuedCount, &item.DeliveredCount, &item.FailedCount, &item.SuppressedCount, &scheduled, &started, &completed, &created, &updated)
+	err := row.Scan(&item.ID, &item.MailboxID, &item.MailboxAddress, &item.SenderCount, &item.Name, &item.Subject, &item.BodyText, &item.BodyHTML, &item.Status, &item.PauseReason, &item.RatePerMinute, &consent, &item.TotalCount, &item.PendingCount, &item.QueuedCount, &item.DeliveredCount, &item.FailedCount, &item.SuppressedCount, &scheduled, &started, &completed, &created, &updated)
 	if err != nil {
 		return item, err
 	}
@@ -493,7 +497,7 @@ func (a *App) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("启动前必须确认所有收件人已同意接收邮件"))
 		return
 	}
-	if strings.TrimSpace(a.config().SMTPHost) == "" {
+	if !a.hasUsableSMTPRoute(r.Context()) {
 		badRequest(w, errors.New("请先在系统设置中配置发信 SMTP"))
 		return
 	}
@@ -501,6 +505,22 @@ func (a *App) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 	if parsed, err := url.Parse(baseURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		badRequest(w, errors.New("请先在系统设置中填写正确的外部访问地址，以便退订链接正常工作"))
 		return
+	}
+	if !a.config().AllowInsecureHTTP {
+		parsed, _ := url.Parse(baseURL)
+		if parsed.Scheme != "https" {
+			badRequest(w, errors.New("正式群发必须使用 HTTPS 外部访问地址，以保护退订链接"))
+			return
+		}
+		var unreadyDomains int
+		if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(DISTINCT d.id) FROM campaign_senders cs JOIN mailboxes mb ON mb.id=cs.mailbox_id JOIN domains d ON d.id=mb.domain_id WHERE cs.campaign_id=? AND (d.status<>'active' OR d.dns_status<>'ok')`, id).Scan(&unreadyDomains); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to check sender domains")
+			return
+		}
+		if unreadyDomains > 0 {
+			badRequest(w, errors.New("发件域名尚未通过 MX、SPF、DKIM、DMARC 和 PTR 检测，请先在域名管理中完成检查"))
+			return
+		}
 	}
 	if item.PendingCount == 0 {
 		badRequest(w, errors.New("没有可发送的收件人，名单可能已全部退订"))
@@ -513,7 +533,7 @@ func (a *App) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 		status = campaignStatusScheduled
 		next = *item.ScheduledAt
 	}
-	_, err = a.db.ExecContext(r.Context(), `UPDATE campaigns SET status=?,next_dispatch_at=?,started_at=CASE WHEN ?='running' THEN COALESCE(started_at,?) ELSE started_at END,updated_at=? WHERE id=? AND status='draft'`, status, next.Format(time.RFC3339Nano), status, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), id)
+	_, err = a.db.ExecContext(r.Context(), `UPDATE campaigns SET status=?,pause_reason='',next_dispatch_at=?,started_at=CASE WHEN ?='running' THEN COALESCE(started_at,?) ELSE started_at END,updated_at=? WHERE id=? AND status='draft'`, status, next.Format(time.RFC3339Nano), status, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), id)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to start campaign")
 		return
@@ -536,7 +556,7 @@ func (a *App) changeCampaignStatus(w http.ResponseWriter, r *http.Request, from 
 	query := `UPDATE campaigns SET status=?,updated_at=?`
 	args := []any{to, now}
 	if to == campaignStatusRunning {
-		query += `,next_dispatch_at=?,started_at=COALESCE(started_at,?)`
+		query += `,pause_reason='',next_dispatch_at=?,started_at=COALESCE(started_at,?)`
 		args = append(args, now, now)
 	}
 	query += ` WHERE id=? AND status IN (` + strings.TrimSuffix(strings.Repeat("?,", len(from)), ",") + `)`
@@ -756,7 +776,7 @@ func (a *App) enqueueCampaignRecipient(ctx context.Context, campaignID string, r
 	}
 	unsubscribeURL := strings.TrimRight(strings.TrimSpace(a.config().PublicBaseURL), "/") + "/api/unsubscribe?token=" + url.QueryEscape(token)
 	personalText := bodyText + "\n\n--\n不再接收此类邮件：" + unsubscribeURL
-	personalHTML := bodyHTML + `<div style="margin-top:28px;padding-top:16px;border-top:1px solid #e5e7eb;color:#64748b;font-size:12px;line-height:1.6;text-align:center">您收到此邮件是因为曾同意接收相关消息。<a href="` + html.EscapeString(unsubscribeURL) + `" style="color:#475569">点击退订</a></div>`
+	personalHTML := appendCampaignUnsubscribeHTML(bodyHTML, unsubscribeURL)
 	messageID := fmt.Sprintf("<campaign-%s@%s>", recipient.ID, strings.SplitN(mailboxAddress, "@", 2)[1])
 	mimeBytes, err := BuildMIME(MIMEMessage{
 		From: mailboxAddress, FromName: fromName, To: []string{recipient.Email}, Subject: subject, Text: personalText, HTML: personalHTML, MessageID: messageID, Date: now,
@@ -968,4 +988,26 @@ func truncateCampaignError(value string) string {
 		return value
 	}
 	return value[:1000]
+}
+
+func campaignHTMLHasNonTextContent(value string) bool {
+	value = strings.ToLower(value)
+	for _, token := range []string{"<img", "<table", "<hr"} {
+		if strings.Contains(value, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendCampaignUnsubscribeHTML(bodyHTML, unsubscribeURL string) string {
+	block := `<div style="margin-top:28px;padding-top:16px;border-top:1px solid #e5e7eb;color:#64748b;font-size:12px;line-height:1.6;text-align:center">您收到此邮件是因为曾同意接收相关消息。<a href="` + html.EscapeString(unsubscribeURL) + `" style="color:#475569">点击退订</a></div>`
+	lower := strings.ToLower(bodyHTML)
+	if index := strings.LastIndex(lower, "</body>"); index >= 0 {
+		return bodyHTML[:index] + block + bodyHTML[index:]
+	}
+	if index := strings.LastIndex(lower, "</html>"); index >= 0 {
+		return bodyHTML[:index] + block + bodyHTML[index:]
+	}
+	return bodyHTML + block
 }

@@ -170,15 +170,73 @@ func (a *App) sendSMTP(from string, recipients []string, mimeBytes []byte) error
 }
 
 func sendSMTPWithConfig(cfg Config, from string, recipients []string, mimeBytes []byte) error {
+	return sendSMTPWithTLSMode(cfg, "", from, recipients, mimeBytes)
+}
+
+type smtpSendError struct {
+	err          error
+	retrySafe    bool
+	failoverSafe bool
+}
+
+func (e *smtpSendError) Error() string { return e.err.Error() }
+func (e *smtpSendError) Unwrap() error { return e.err }
+
+func smtpPhaseError(err error, retrySafe bool) error {
+	if err == nil {
+		return nil
+	}
+	return &smtpSendError{err: err, retrySafe: retrySafe, failoverSafe: retrySafe}
+}
+
+func smtpCommandError(err error, phase string) error {
+	if err == nil {
+		return nil
+	}
+	retrySafe := false
+	var protocolErr *textproto.Error
+	if errors.As(err, &protocolErr) {
+		retrySafe = protocolErr.Code >= 400 && protocolErr.Code < 500
+	}
+	return &smtpSendError{err: err, retrySafe: retrySafe, failoverSafe: phase == "auth"}
+}
+
+func smtpErrorRetrySafe(err error) bool {
+	var phaseErr *smtpSendError
+	return errors.As(err, &phaseErr) && phaseErr.retrySafe
+}
+
+func smtpErrorFailoverSafe(err error) bool {
+	var phaseErr *smtpSendError
+	return errors.As(err, &phaseErr) && phaseErr.failoverSafe
+}
+
+func smtpErrorAffectsRelay(err error) bool {
+	if smtpErrorFailoverSafe(err) {
+		return true
+	}
+	var protocolErr *textproto.Error
+	return errors.As(err, &protocolErr) && (protocolErr.Code == 421 || protocolErr.Code == 451)
+}
+
+func smtpRetryDelay(err error, fallback time.Duration) time.Duration {
+	var protocolErr *textproto.Error
+	if errors.As(err, &protocolErr) && (protocolErr.Code == 421 || protocolErr.Code == 450 || protocolErr.Code == 451) && fallback < 5*time.Minute {
+		return 5 * time.Minute
+	}
+	return fallback
+}
+
+func sendSMTPWithTLSMode(cfg Config, tlsMode, from string, recipients []string, mimeBytes []byte) error {
 	addr := net.JoinHostPort(cfg.SMTPHost, cfg.SMTPPort)
 	var auth smtp.Auth
 	if cfg.SMTPUsername != "" {
 		auth = smtp.PlainAuth("", cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPHost)
 	}
-	if !cfg.SMTPRequireTLS {
+	if tlsMode == "plain" || tlsMode == "" && !cfg.SMTPRequireTLS {
 		return sendSMTPPlain(addr, cfg.SMTPHost, auth, from, recipients, mimeBytes)
 	}
-	if cfg.SMTPPort == "465" {
+	if tlsMode == "tls" || tlsMode == "" && cfg.SMTPPort == "465" {
 		return sendSMTPImplicitTLS(addr, cfg.SMTPHost, auth, from, recipients, mimeBytes)
 	}
 	return sendSMTPStartTLS(addr, cfg.SMTPHost, auth, from, recipients, mimeBytes)
@@ -187,13 +245,13 @@ func sendSMTPWithConfig(cfg Config, from string, recipients []string, mimeBytes 
 func sendSMTPPlain(addr, host string, auth smtp.Auth, from string, recipients []string, mimeBytes []byte) error {
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
-		return err
+		return smtpPhaseError(err, true)
 	}
 	_ = conn.SetDeadline(time.Now().Add(smtpSessionTimeout))
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
 		_ = conn.Close()
-		return err
+		return smtpPhaseError(err, true)
 	}
 	defer client.Close()
 	return sendSMTPMessage(client, auth, from, recipients, mimeBytes)
@@ -203,13 +261,13 @@ func sendSMTPImplicitTLS(addr, host string, auth smtp.Auth, from string, recipie
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
 	if err != nil {
-		return err
+		return smtpPhaseError(err, true)
 	}
 	_ = conn.SetDeadline(time.Now().Add(smtpSessionTimeout))
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
 		_ = conn.Close()
-		return err
+		return smtpPhaseError(err, true)
 	}
 	defer client.Close()
 	return sendSMTPMessage(client, auth, from, recipients, mimeBytes)
@@ -218,20 +276,20 @@ func sendSMTPImplicitTLS(addr, host string, auth smtp.Auth, from string, recipie
 func sendSMTPStartTLS(addr, host string, auth smtp.Auth, from string, recipients []string, mimeBytes []byte) error {
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
-		return err
+		return smtpPhaseError(err, true)
 	}
 	_ = conn.SetDeadline(time.Now().Add(smtpSessionTimeout))
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
 		_ = conn.Close()
-		return err
+		return smtpPhaseError(err, true)
 	}
 	defer client.Close()
 	if ok, _ := client.Extension("STARTTLS"); !ok {
-		return errors.New("smtp server does not support STARTTLS")
+		return smtpPhaseError(errors.New("smtp server does not support STARTTLS"), true)
 	}
 	if err := client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
-		return err
+		return smtpPhaseError(err, true)
 	}
 	return sendSMTPMessage(client, auth, from, recipients, mimeBytes)
 }
@@ -239,29 +297,32 @@ func sendSMTPStartTLS(addr, host string, auth smtp.Auth, from string, recipients
 func sendSMTPMessage(client *smtp.Client, auth smtp.Auth, from string, recipients []string, mimeBytes []byte) error {
 	if auth != nil {
 		if err := client.Auth(auth); err != nil {
-			return err
+			return smtpCommandError(err, "auth")
 		}
 	}
 	if err := client.Mail(from); err != nil {
-		return err
+		return smtpCommandError(err, "mail")
 	}
 	for _, rcpt := range recipients {
 		if err := client.Rcpt(rcpt); err != nil {
-			return err
+			return smtpCommandError(err, "recipient")
 		}
 	}
 	wc, err := client.Data()
 	if err != nil {
-		return err
+		return smtpCommandError(err, "data")
 	}
 	if _, err := wc.Write(mimeBytes); err != nil {
 		_ = wc.Close()
-		return err
+		return smtpPhaseError(err, false)
 	}
 	if err := wc.Close(); err != nil {
-		return err
+		return smtpPhaseError(err, false)
 	}
-	return client.Quit()
+	// A successful DATA close is the SMTP acceptance point. A later QUIT
+	// failure must not cause another relay to deliver the same message again.
+	_ = client.Quit()
+	return nil
 }
 
 func htmlEscape(s string) string {

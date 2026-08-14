@@ -416,6 +416,47 @@ func (a *App) migrate(ctx context.Context) error {
 			delivered_at TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_send_queue_due ON send_queue(status, next_attempt_at, created_at)`,
+		`CREATE TABLE IF NOT EXISTS smtp_relays (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			host TEXT NOT NULL,
+			port INTEGER NOT NULL,
+			username TEXT NOT NULL DEFAULT '',
+			password_ciphertext TEXT NOT NULL DEFAULT '',
+			tls_mode TEXT NOT NULL DEFAULT 'starttls' CHECK(tls_mode IN ('plain','starttls','tls')),
+			enabled INTEGER NOT NULL DEFAULT 1,
+			priority INTEGER NOT NULL DEFAULT 100,
+			minute_limit INTEGER NOT NULL DEFAULT 30,
+			daily_limit INTEGER NOT NULL DEFAULT 1000,
+			domain_ids_json TEXT NOT NULL DEFAULT '[]',
+			mailbox_ids_json TEXT NOT NULL DEFAULT '[]',
+			failure_count INTEGER NOT NULL DEFAULT 0,
+			circuit_open_until TEXT,
+			last_error TEXT NOT NULL DEFAULT '',
+			last_success_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_smtp_relays_enabled_priority ON smtp_relays(enabled,priority,created_at)`,
+		`CREATE TABLE IF NOT EXISTS smtp_relay_events (
+			id TEXT PRIMARY KEY,
+			relay_id TEXT NOT NULL REFERENCES smtp_relays(id) ON DELETE CASCADE,
+			queue_id TEXT NOT NULL,
+			event TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(relay_id,queue_id,event)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_smtp_relay_events_usage ON smtp_relay_events(relay_id,event,created_at)`,
+		`CREATE TABLE IF NOT EXISTS deliverability_settings (
+			id TEXT PRIMARY KEY CHECK(id='default'),
+			auto_pause INTEGER NOT NULL DEFAULT 1,
+			complaint_threshold REAL NOT NULL DEFAULT 0.1,
+			bounce_threshold REAL NOT NULL DEFAULT 2.0,
+			minimum_sample INTEGER NOT NULL DEFAULT 100,
+			circuit_failure_threshold INTEGER NOT NULL DEFAULT 3,
+			circuit_minutes INTEGER NOT NULL DEFAULT 15,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS campaigns (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -728,6 +769,9 @@ func (a *App) migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := a.migrateBulkDeliverability(ctx); err != nil {
+		return err
+	}
 	if err := a.migrateMessagesForUnregistered(ctx); err != nil {
 		return err
 	}
@@ -795,6 +839,18 @@ func (a *App) migrate(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (a *App) migrateBulkDeliverability(ctx context.Context) error {
+	if err := a.ensureTableColumn(ctx, "send_queue", "relay_id", `ALTER TABLE send_queue ADD COLUMN relay_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := a.ensureTableColumn(ctx, "campaigns", "pause_reason", `ALTER TABLE campaigns ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	_, err := a.db.ExecContext(ctx, `INSERT OR IGNORE INTO deliverability_settings(id,updated_at) VALUES('default',?)`, now)
+	return err
 }
 
 func (a *App) migrateTelegramNotifications(ctx context.Context) error {
