@@ -132,7 +132,7 @@ func LoadConfig() Config {
 		StatusWebhookURL:                getenv("LANQIN_STATUS_WEBHOOK_URL", ""),
 		StatusWebhookSecret:             getenv("LANQIN_STATUS_WEBHOOK_SECRET", ""),
 		StatusWebhookAllowPrivateHosts:  getenvBool("LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS", false),
-		ReleaseAPIURL:                   getenv("LANQIN_RELEASE_API_URL", "https://gitea.xzys.me/api/v1/repos/szx/NewSzxcn-Email-Bulk/releases/latest"),
+		ReleaseAPIURL:                   getenv("LANQIN_RELEASE_API_URL", "https://api.github.com/repos/zxyszx/NewSzxcn-Email-Bulk/releases/latest"),
 		UpdateServiceURL:                getenv("LANQIN_UPDATE_SERVICE_URL", ""),
 		UpdateServiceToken:              getenv("LANQIN_UPDATE_SERVICE_TOKEN", ""),
 		BackupSourceDir:                 getenv("LANQIN_BACKUP_SOURCE_DIR", "/usr/share/newszxcn-email/deploy"),

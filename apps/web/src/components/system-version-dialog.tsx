@@ -88,7 +88,7 @@ export function SystemVersionDialog({ mode = "sidebar", className }: { mode?: "s
             {version.data?.latestVersion && <div className="mt-1 text-xs text-muted-foreground">最新版本：{version.data.latestVersion}</div>}
           </div>
 
-          {version.isLoading && <VersionState icon={<Loader2 className="animate-spin" />} title="正在检查更新" description="正在连接 Gitea 版本发布。" />}
+          {version.isLoading && <VersionState icon={<Loader2 className="animate-spin" />} title="正在检查更新" description="正在连接 GitHub 版本发布。" />}
           {version.data?.checkError && <VersionState icon={<TriangleAlert />} title="暂时无法检查更新" description={version.data.checkError} tone="warning" />}
           {version.data && !version.data.checkError && !version.data.updateAvailable && <VersionState icon={<CheckCircle2 />} title="已是最新版本" description="当前无需更新。" tone="success" />}
           {version.data?.updateAvailable && (

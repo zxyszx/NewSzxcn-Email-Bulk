@@ -5,7 +5,7 @@
 推荐直接使用仓库根目录的管理脚本：
 
 ```bash
-curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email-Bulk/main/install.sh | sudo bash
 ```
 
 后续操作：
@@ -21,7 +21,7 @@ sudo newszxcn-email reset-password
 sudo newszxcn-email reset-2fa
 ```
 
-一键安装会把配置和数据放在 `/opt/newszxcn-email`。脚本优先拉取 Gitea 容器镜像；镜像暂不可用时会自动下载群发版源码并在服务器构建，绝不会回退到普通版镜像。源码构建模式请使用 `sudo newszxcn-email update` 更新，后台页面更新按钮会保持关闭，避免误以为 Watchtower 能更新本地镜像。
+一键安装会把配置和数据放在 `/opt/newszxcn-email`。脚本优先拉取 GHCR 容器镜像；镜像暂不可用时会自动下载群发版源码并在服务器构建，绝不会回退到普通版镜像。源码构建模式请使用 `sudo newszxcn-email update` 更新，后台页面更新按钮会保持关闭，避免误以为 Watchtower 能更新本地镜像。
 
 首次安装会依次询问防火墙模式和邮件服务器域名，自动检测邮箱地址域名，再选择默认 `admin` 前缀或自行创建管理员邮箱前缀，最后输入密码并选择 Web 部署方式。防火墙可以选择自动添加邮局必要端口规则或保留现有规则，不会清空服务器已有防火墙。自动 Web 模式会把容器绑定到 `127.0.0.1:8088`，配置宿主机 Nginx，并使用官方 `acme.sh` 申请和续期证书。例如服务器域名 `mail.newszxcn.com`、选择默认前缀会创建 `admin@newszxcn.com`；自定义管理员密码最少 6 位，留空则生成 12 位密码。
 
@@ -79,17 +79,17 @@ docker compose up -d
 docker compose down
 ```
 
-## Gitea 容器镜像
+## GHCR 容器镜像
 
 默认镜像：
 
 ```text
-gitea.xzys.me/szx/newszxcn-email-bulk:latest
-gitea.xzys.me/szx/newszxcn-email-bulk-api:latest
-gitea.xzys.me/szx/newszxcn-email-bulk-web:latest
-gitea.xzys.me/szx/newszxcn-email-bulk-postfix:latest
-gitea.xzys.me/szx/newszxcn-email-bulk-dovecot:latest
-gitea.xzys.me/szx/newszxcn-email-bulk-rspamd:latest
+ghcr.io/zxyszx/newszxcn-email-bulk:latest
+ghcr.io/zxyszx/newszxcn-email-bulk-api:latest
+ghcr.io/zxyszx/newszxcn-email-bulk-web:latest
+ghcr.io/zxyszx/newszxcn-email-bulk-postfix:latest
+ghcr.io/zxyszx/newszxcn-email-bulk-dovecot:latest
+ghcr.io/zxyszx/newszxcn-email-bulk-rspamd:latest
 ```
 
 如果拉取时报：
@@ -98,10 +98,10 @@ gitea.xzys.me/szx/newszxcn-email-bulk-rspamd:latest
 unauthorized
 ```
 
-说明 Gitea Package 还是私有。公开部署应把 Package 设为公开；私有部署需要先登录容器仓库：
+说明 GitHub Container Registry Package 还是私有。公开部署应把 GHCR Package 设为公开；私有部署需要先登录容器仓库：
 
 ```bash
-echo "<gitea_token>" | docker login gitea.xzys.me -u <gitea_user> --password-stdin
+echo "<github_token>" | docker login ghcr.io -u <github_user> --password-stdin
 ```
 
 一键安装器在无法拉取镜像时会自动改用源码构建，因此公开仓库无需手动登录也能完成安装。

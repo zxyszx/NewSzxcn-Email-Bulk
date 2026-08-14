@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPOSITORY="szx/NewSzxcn-Email-Bulk"
-GITEA_BASE="https://gitea.xzys.me/${REPOSITORY}"
-RAW_BASE="${GITEA_BASE}/raw/branch/main"
-SOURCE_ARCHIVE="${GITEA_BASE}/archive/main.tar.gz"
+REPOSITORY="zxyszx/NewSzxcn-Email-Bulk"
+GITHUB_BASE="https://github.com/${REPOSITORY}"
+RAW_BASE="https://raw.githubusercontent.com/${REPOSITORY}/main"
+SOURCE_ARCHIVE="${GITHUB_BASE}/archive/refs/heads/main.tar.gz"
 INSTALL_DIR="${LANQIN_INSTALL_DIR:-/opt/newszxcn-email}"
 COMMAND="${1:-menu}"
 ROLLBACK_FILE="${INSTALL_DIR}/.rollback-image"
@@ -904,7 +904,7 @@ current_image_id() {
     return
   fi
   image_ref="$(env_value LANQIN_IMAGE || true)"
-  image_ref="${image_ref:-gitea.xzys.me/szx/newszxcn-email-bulk:latest}"
+  image_ref="${image_ref:-ghcr.io/zxyszx/newszxcn-email-bulk:latest}"
   docker image inspect --format '{{.Id}}' "${image_ref}" 2>/dev/null
 }
 
@@ -1393,7 +1393,7 @@ do_restore_backup() {
     log "正在拉取恢复所需的 NewSzxcn Email 镜像..."
     prepare_runtime
     image_ref="$(env_value LANQIN_IMAGE || true)"
-    image_ref="${image_ref:-gitea.xzys.me/szx/newszxcn-email-bulk:latest}"
+    image_ref="${image_ref:-ghcr.io/zxyszx/newszxcn-email-bulk:latest}"
     image="$(docker image inspect --format '{{.Id}}' "${image_ref}" 2>/dev/null || true)"
     [[ -n "${image}" ]] || fail "无法检查恢复数据库：镜像不存在。"
     sqlite_integrity_check "${INSTALL_DIR}/data/lanqin.db" "${image}" || fail "备份数据库完整性检查未通过，服务未启动。"
@@ -1579,7 +1579,7 @@ SSL 证书：有效期至 ${certificate_expiry}
 重置管理员密码：newszxcn-email reset-password
 
 公开教程：
-https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/src/branch/main/docs/GUIDE.md
+https://github.com/zxyszx/NewSzxcn-Email-Bulk/blob/main/docs/GUIDE.md
 EOF
   install -m 0600 "${tmp}" "${GUIDE_FILE}"
   rm -f "${tmp}"

@@ -2,7 +2,7 @@
 
 NewSzxcn-Email-Bulk 是独立的群发定制版邮箱系统，保留完整 Webmail 与管理后台，并增加合规群发、多发件人自动分配和逐封投递跟踪。
 
-[版本发布](https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/releases) · [部署文档](deploy/README.md) · [English](README.en.md)
+[版本发布](https://github.com/zxyszx/NewSzxcn-Email-Bulk/releases) · [部署文档](deploy/README.md) · [English](README.en.md)
 
 ## 主要功能
 
@@ -22,13 +22,13 @@ NewSzxcn-Email-Bulk 是独立的群发定制版邮箱系统，保留完整 Webma
 支持 Debian / Ubuntu 的 `amd64` 与 `arm64` 服务器。建议至少 2 核、2 GB 内存，并准备一个已解析到服务器的邮件主机名，例如 `mail.example.com`。
 
 ```bash
-curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email-Bulk/main/install.sh | sudo bash
 ```
 
 已使用 `root` 登录时，也可以使用：
 
 ```bash
-bash <(curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email-Bulk/main/install.sh)
 ```
 
 脚本会自动完成：
@@ -39,7 +39,7 @@ bash <(curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/
 - 选择自动 Nginx + SSL、宝塔/已有 Nginx 反代或 HTTP 测试模式
 - 自动模式使用官方 `acme.sh` 签发和续期证书，不会强制停止占用 80 端口的进程
 - 创建 `/opt/newszxcn-email` 持久化目录
-- 拉取 Gitea 容器镜像并启动邮件服务；镜像不可用时自动从源码构建
+- 拉取 GHCR 容器镜像并启动邮件服务；镜像不可用时自动从源码构建
 - 生成后台在线更新所需的内部鉴权令牌
 - 等待 Web 与 API 健康检查通过
 
@@ -124,7 +124,7 @@ sudo newszxcn-email uninstall
 需要自行控制 Compose 配置时：
 
 ```bash
-git clone https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk.git
+git clone https://github.com/zxyszx/NewSzxcn-Email-Bulk.git
 cd NewSzxcn-Email-Bulk/deploy
 cp .env.example .env
 # 编辑 .env
@@ -146,7 +146,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - 后端：Go、Chi、SQLite
 - 前端：React、TypeScript、TanStack Query、shadcn/ui、Tailwind CSS
 - 邮件：Postfix、Dovecot、Rspamd
-- 部署：Docker、Docker Compose、Gitea
+- 部署：Docker、Docker Compose、GitHub Actions、GHCR
 
 ## 本地开发
 

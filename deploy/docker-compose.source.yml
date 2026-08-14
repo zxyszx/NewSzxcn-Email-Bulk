@@ -9,4 +9,4 @@ services:
         APP_VERSION: ${LANQIN_BUILD_VERSION:-dev}
         APP_COMMIT: ${LANQIN_BUILD_COMMIT:-local}
         VITE_APP_VERSION: ${LANQIN_BUILD_VERSION:-dev}
-        VITE_RELEASE_URL: ${LANQIN_BUILD_RELEASE_URL:-https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/releases}
+        VITE_RELEASE_URL: ${LANQIN_BUILD_RELEASE_URL:-https://github.com/zxyszx/NewSzxcn-Email-Bulk/releases}

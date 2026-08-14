@@ -22,7 +22,7 @@ Telegram 消息包含邮局域名、服务器 IP、系统版本、已有域名�
 确认文件已经上传后，首次执行官方脚本：
 
 ```bash
-curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email-Bulk/main/install.sh | sudo bash
 ```
 
 脚本显示“尚未安装”管理菜单后，输入 `2`，选择“备份恢复”。在恢复完成后，以后需要管理系统时才使用 `ns` 打开管理菜单。

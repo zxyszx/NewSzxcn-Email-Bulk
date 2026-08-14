@@ -2,7 +2,7 @@
 
 NewSzxcn Email Bulk is a separate consent-based campaign edition of NewSzxcn Email. It preserves the complete Webmail and administration console while adding multi-sender distribution, recipient import, rate limits, scheduling, unsubscribe handling, and per-recipient delivery tracking.
 
-[Releases](https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/releases) · [Chinese README](README.md)
+[Releases](https://github.com/zxyszx/NewSzxcn-Email-Bulk/releases) · [Chinese README](README.md)
 
 ## Features
 
@@ -19,7 +19,7 @@ NewSzxcn Email Bulk is a separate consent-based campaign edition of NewSzxcn Ema
 Debian and Ubuntu on `amd64` or `arm64` are supported.
 
 ```bash
-curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email-Bulk/main/install.sh | sudo bash
 ```
 
 The installer configures `/opt/newszxcn-email`, starts the Docker services, and waits for the health check. DNS records and provider port restrictions must still be configured by the operator.
@@ -56,7 +56,7 @@ Open TCP ports `25`, `80`, `443`, `465`, `587`, `993`, and `995` as needed. Publ
 ## Manual source deployment
 
 ```bash
-git clone https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk.git
+git clone https://github.com/zxyszx/NewSzxcn-Email-Bulk.git
 cd NewSzxcn-Email-Bulk/deploy
 cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build

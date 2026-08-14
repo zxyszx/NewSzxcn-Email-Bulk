@@ -7,7 +7,7 @@
 建议使用 Debian 或 Ubuntu，并提前准备一个已经解析到服务器的邮件主机名，例如 `mail.example.com`。
 
 ```bash
-bash <(curl -fsSL https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/raw/branch/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/zxyszx/NewSzxcn-Email-Bulk/main/install.sh)
 ```
 
 安装脚本会依次询问防火墙配置和邮件服务器域名，自动检测邮箱地址域名，再让你选择默认 `admin` 前缀或自定义管理员邮箱前缀，最后输入密码并选择 Web 部署方式。例如输入服务器域名 `mail.newszxcn.com`，确认检测结果 `@newszxcn.com`，选择 `1. 使用默认前缀 admin` 会创建 `admin@newszxcn.com`；选择 `2. 自定义管理员邮箱前缀` 后才需要输入邮箱账号前缀。选择“自动配置 Nginx + SSL”时，脚本会安装 Nginx，并使用官方 `acme.sh` 申请 Let's Encrypt 证书。
@@ -170,4 +170,4 @@ sudo newszxcn-email reset-2fa
 - [项目说明](../README.md)
 - [Docker 部署说明](../deploy/README.md)
 - [API 文档](API.md)
-- [版本发布](https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/releases)
+- [版本发布](https://github.com/zxyszx/NewSzxcn-Email-Bulk/releases)

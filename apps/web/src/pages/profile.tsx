@@ -394,7 +394,7 @@ export function ProfilePage() {
         <StatsRangeTabs rangeDays={statsRangeDays} onRangeChange={setStatsRangeDays} />
       </div>
     : tab === "apiTokens"
-      ? <Button asChild variant="outline" size="sm" className="h-8 px-3 text-xs"><a href="https://gitea.xzys.me/szx/NewSzxcn-Email-Bulk/src/branch/main/docs/API.md" target="_blank" rel="noreferrer"><BookOpen className="h-4 w-4" />API 文档</a></Button>
+      ? <Button asChild variant="outline" size="sm" className="h-8 px-3 text-xs"><a href="https://github.com/zxyszx/NewSzxcn-Email-Bulk/blob/main/docs/API.md" target="_blank" rel="noreferrer"><BookOpen className="h-4 w-4" />API 文档</a></Button>
       : undefined
 
   return (
