@@ -11,7 +11,7 @@ import TextAlign from "@tiptap/extension-text-align"
 import Placeholder from "@tiptap/extension-placeholder"
 import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
 import { useNavigate } from "react-router-dom"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Ban, Bell, Bold, Bot, Briefcase, Calendar, Check, ChevronDown, Clock3, Code2, Copy, Download, Ellipsis, Eraser, Eye, FileText, Folder, Forward, GraduationCap, Heart, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, Mailbox as MailboxIcon, MailCheck, MailQuestion, Maximize2, Megaphone, Minimize2, Moon, PanelLeftOpen, Paperclip, PencilLine, Plane, Plus, Quote, Receipt, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, ShoppingBag, Signature, SlidersHorizontal, Smile, Sparkles, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, Upload, Users, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Ban, Bell, Bold, Bot, Briefcase, Calendar, Check, ChevronDown, Clock3, Code2, Copy, Download, Ellipsis, Eraser, FileText, Folder, Forward, GraduationCap, Heart, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, Mailbox as MailboxIcon, MailCheck, MailQuestion, Maximize2, Megaphone, Minimize2, Moon, PanelLeftOpen, Paperclip, PencilLine, Plane, Plus, Quote, Receipt, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, ShoppingBag, Signature, SlidersHorizontal, Smile, Sparkles, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, Upload, Users, X } from "lucide-react"
 import { api, ExternalImapAccount, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, MailSearchParams, SendPayload, DraftPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, PermissionLimits } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
@@ -4572,7 +4572,7 @@ function MailBodyComposer({ defaultValue, defaultHtml, expanded, files, signatur
   const [scheduleOpen, setScheduleOpen] = React.useState(false)
   const [emojiOpen, setEmojiOpen] = React.useState(false)
   const [insertDialog, setInsertDialog] = React.useState<InsertDialogState | null>(null)
-  const [previewOpen, setPreviewOpen] = React.useState(false)
+  const [viewMode, setViewMode] = React.useState<"content" | "preview" | "compare">("content")
   const [empty, setEmpty] = React.useState(!defaultValue.trim())
   const [selectionVersion, setSelectionVersion] = React.useState(0)
 
@@ -4728,7 +4728,41 @@ function MailBodyComposer({ defaultValue, defaultHtml, expanded, files, signatur
   return (
     <div className="flex min-h-[300px] min-w-0 flex-1 flex-col bg-background sm:min-h-[360px]">
       <Input ref={fileInputRef} type="file" multiple className="hidden" onChange={handlePickedFiles} />
-      <div className="flex min-h-11 flex-wrap items-center gap-1 overflow-visible border-b px-3 py-2 sm:px-5">
+      <div className="flex min-h-11 items-center justify-between gap-3 border-b px-3 sm:px-5">
+        <div className="flex h-11 items-stretch" aria-label="正文视图">
+          {([['content', '内容'], ['preview', '预览'], ['compare', '对照']] as const).map(([mode, label]) => (
+            <Button
+              key={mode}
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn("relative h-11 rounded-none px-3 font-medium text-muted-foreground hover:bg-transparent hover:text-foreground", viewMode === mode && "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-foreground")}
+              aria-pressed={viewMode === mode}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setViewMode(mode)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="hidden truncate text-xs text-muted-foreground sm:inline">支持富文本编辑</span>
+          <Button
+            type="button"
+            variant={expanded ? "secondary" : "ghost"}
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            title={expanded ? "还原写信窗口" : "放大写信窗口"}
+            aria-label={expanded ? "还原写信窗口" : "放大写信窗口"}
+            aria-pressed={expanded}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onExpandedChange(!expanded)}
+          >
+            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
+      {viewMode !== "preview" && <div className="flex min-h-11 flex-wrap items-center gap-1 overflow-visible border-b px-3 py-2 sm:px-5">
         <ToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 className="h-4 w-4" /></ToolbarButton>
         <ToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 className="h-4 w-4" /></ToolbarButton>
         <Separator orientation="vertical" className="mx-2 h-6" />
@@ -4764,13 +4798,11 @@ function MailBodyComposer({ defaultValue, defaultHtml, expanded, files, signatur
           </DropdownMenuContent>
         </DropdownMenu>
         <ToolbarTextButton label="格式" icon={<Type className="h-4 w-4" />} active={formatOpen} onClick={() => setFormatOpen((value) => !value)} />
-        <div className="flex items-center gap-1">
-          <ToolbarTextButton label="预览" icon={<Eye className="h-4 w-4" />} active={previewOpen} onClick={() => setPreviewOpen(true)} />
+        <div className="ml-auto flex items-center gap-1">
           <ToolbarTextButton label="签名" icon={<Signature className="h-4 w-4" />} onClick={insertSignature} disabled={!signatureText.trim()} />
-          <ToolbarButton label={expanded ? "还原编辑窗口" : "放大编辑窗口"} active={expanded} onClick={() => onExpandedChange(!expanded)}>{expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</ToolbarButton>
         </div>
-      </div>
-      {formatOpen && (
+      </div>}
+      {viewMode !== "preview" && formatOpen && (
         <div className="flex min-h-14 flex-wrap items-center gap-1 overflow-visible border-b bg-muted/40 px-3 py-2 sm:px-5">
           <ToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser className="h-4 w-4" /></ToolbarButton>
           <Separator orientation="vertical" className="mx-1 h-6" />
@@ -4877,13 +4909,21 @@ function MailBodyComposer({ defaultValue, defaultHtml, expanded, files, signatur
         </div>
       )}
       <div className={cn(
-        "composer-editor relative flex min-h-[220px] min-w-0 flex-1 overflow-hidden border-b focus-within:bg-card/40 sm:min-h-[260px]",
+        "composer-editor relative grid min-h-[220px] min-w-0 flex-1 overflow-hidden border-b focus-within:bg-card/40 sm:min-h-[260px]",
+        viewMode === "compare" && "sm:grid-cols-2",
         "[&_.ProseMirror]:min-h-[220px] [&_.ProseMirror]:min-w-0 [&_.ProseMirror]:w-full [&_.ProseMirror]:max-w-full [&_.ProseMirror]:flex-1 [&_.ProseMirror]:overflow-x-hidden [&_.ProseMirror]:overflow-y-auto [&_.ProseMirror]:px-4 [&_.ProseMirror]:py-4 [&_.ProseMirror]:text-base [&_.ProseMirror]:leading-7 [&_.ProseMirror]:outline-none [&_.ProseMirror]:[overflow-wrap:anywhere] sm:[&_.ProseMirror]:min-h-[260px] sm:[&_.ProseMirror]:px-5",
         "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
         "[&_.ProseMirror_a]:break-all [&_.ProseMirror_p]:max-w-full [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-border [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_pre]:max-w-full [&_.ProseMirror_pre]:whitespace-pre-wrap [&_.ProseMirror_pre]:break-words [&_.ProseMirror_pre]:rounded-md [&_.ProseMirror_pre]:bg-muted [&_.ProseMirror_pre]:p-3",
         empty && "bg-background"
       )}>
-        <EditorContent editor={editor} className="flex min-h-0 min-w-0 flex-1 overflow-hidden" />
+        <EditorContent editor={editor} className={cn("min-h-0 min-w-0 overflow-hidden", viewMode === "preview" && "hidden")} />
+        {viewMode !== "content" && (
+          <div
+            className={cn("mail-html min-h-0 min-w-0 overflow-x-hidden overflow-y-auto bg-muted/[0.08] px-4 py-4 text-base leading-7 [overflow-wrap:anywhere] sm:px-5", viewMode === "compare" && "border-t sm:border-l sm:border-t-0")}
+            aria-label="邮件预览"
+            dangerouslySetInnerHTML={{ __html: sanitizeComposerHtml(editor?.getHTML() || "") || "<p></p>" }}
+          />
+        )}
       </div>
       {files.length > 0 && (
         <div className="border-t px-4 py-3 sm:px-5">
@@ -4903,14 +4943,6 @@ function MailBodyComposer({ defaultValue, defaultHtml, expanded, files, signatur
       )}
       <InsertContentDialog state={insertDialog} onOpenChange={(open) => { if (!open) setInsertDialog(null) }} onConfirm={confirmInsert} />
       <ScheduleDialog open={scheduleOpen} onOpenChange={setScheduleOpen} onConfirm={(schedule) => { insertSchedule(schedule); setScheduleOpen(false) }} />
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="w-[min(92vw,44rem)] max-w-none">
-          <DialogHeader>
-            <DialogTitle>邮件预览</DialogTitle>
-          </DialogHeader>
-          <div className="mail-html max-h-[60vh] max-w-full overflow-x-hidden overflow-y-auto rounded-md border bg-background p-5 text-sm leading-7 [overflow-wrap:anywhere] [&_a]:break-all [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:break-words" dangerouslySetInnerHTML={{ __html: sanitizeComposerHtml(editor?.getHTML() || "") || "<p></p>" }} />
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

@@ -312,6 +312,7 @@ func (a *App) normalizeCampaignInput(ctx context.Context, req campaignInput) (no
 		return out, errors.New("读取退订名单失败")
 	}
 	seen := map[string]bool{}
+	nextMailbox := 0
 	for _, item := range req.Recipients {
 		address, err := mail.ParseAddress(strings.TrimSpace(item.Email))
 		if err != nil {
@@ -336,7 +337,11 @@ func (a *App) normalizeCampaignInput(ctx context.Context, req campaignInput) (no
 		if _, suppressed := suppressedEmails[emailAddress]; suppressed {
 			status = campaignRecipientSuppressed
 		}
-		mailboxID := out.MailboxIDs[len(out.Recipients)%len(out.MailboxIDs)]
+		mailboxID := out.MailboxIDs[0]
+		if status == campaignRecipientPending {
+			mailboxID = out.MailboxIDs[nextMailbox%len(out.MailboxIDs)]
+			nextMailbox++
+		}
 		out.Recipients = append(out.Recipients, CampaignRecipient{ID: newID("crp"), Email: emailAddress, Name: name, MailboxID: mailboxID, Status: status})
 		if len(out.Recipients) > maxCampaignRecipients {
 			return out, fmt.Errorf("单个活动最多支持 %d 个收件人", maxCampaignRecipients)
@@ -440,7 +445,7 @@ func (a *App) loadCampaign(ctx context.Context, id string, withRecipients bool) 
 	if !withRecipients {
 		return item, nil
 	}
-	senderRows, err := a.db.QueryContext(ctx, `SELECT cs.mailbox_id,mb.address,COUNT(cr.id) FROM campaign_senders cs JOIN mailboxes mb ON mb.id=cs.mailbox_id LEFT JOIN campaign_recipients cr ON cr.campaign_id=cs.campaign_id AND cr.mailbox_id=cs.mailbox_id WHERE cs.campaign_id=? GROUP BY cs.mailbox_id,mb.address,cs.sort_order ORDER BY cs.sort_order`, id)
+	senderRows, err := a.db.QueryContext(ctx, `SELECT cs.mailbox_id,mb.address,COUNT(cr.id) FROM campaign_senders cs JOIN mailboxes mb ON mb.id=cs.mailbox_id LEFT JOIN campaign_recipients cr ON cr.campaign_id=cs.campaign_id AND cr.mailbox_id=cs.mailbox_id AND cr.status IN ('pending','queued','delivered','failed') WHERE cs.campaign_id=? GROUP BY cs.mailbox_id,mb.address,cs.sort_order ORDER BY cs.sort_order`, id)
 	if err != nil {
 		return item, err
 	}

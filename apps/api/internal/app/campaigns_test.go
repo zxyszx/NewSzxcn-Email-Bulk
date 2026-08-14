@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,6 +120,209 @@ func TestCampaignMultiSenderQueuesOneRecipientAndRetriesFailures(t *testing.T) {
 	}
 	if code := admin.do("POST", "/api/admin/campaigns/"+campaign.ID+"/retry-failed", map[string]any{"recipientIds": []string{}}, &retried); code != http.StatusOK || retried.Retried != 2 {
 		t.Fatalf("retry failed recipients code=%d result=%+v", code, retried)
+	}
+}
+
+func TestCampaignDistributesOnlySendableRecipientsAcrossSenders(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	a.updateConfig(func(cfg *Config) {
+		cfg.SMTPHost = "127.0.0.1"
+		cfg.SMTPPort = "1"
+		cfg.PublicBaseURL = "https://mail.example.test"
+	})
+
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	user, primary := defaultAdminUserAndMailbox(t, a)
+	secondary := createTestMailbox(t, admin, primary.DomainID, "campaign-two", "Campaign Two", "Password123!", map[string]any{"userId": user.ID})
+	tertiary := createTestMailbox(t, admin, primary.DomainID, "campaign-three", "Campaign Three", "Password123!", map[string]any{"userId": user.ID})
+	if code := admin.do("POST", "/api/admin/campaign-suppressions", map[string]string{"email": "blocked-first@example.test", "reason": "opted out"}, nil); code != http.StatusCreated {
+		t.Fatalf("create suppression code=%d", code)
+	}
+
+	recipients := []map[string]string{{"email": "blocked-first@example.test"}}
+	for index := 1; index <= 7; index++ {
+		recipients = append(recipients, map[string]string{"email": fmt.Sprintf("person-%d@example.test", index)})
+	}
+	var created Campaign
+	if code := admin.do("POST", "/api/admin/campaigns", map[string]any{
+		"mailboxIds":       []string{primary.ID, secondary.ID, tertiary.ID},
+		"name":             "Uneven distribution",
+		"subject":          "Distribution test",
+		"text":             "Hello",
+		"ratePerMinute":    300,
+		"consentConfirmed": true,
+		"recipients":       recipients,
+	}, &created); code != http.StatusCreated {
+		t.Fatalf("create campaign code=%d campaign=%+v", code, created)
+	}
+	var campaign Campaign
+	if code := admin.do("GET", "/api/admin/campaigns/"+created.ID, nil, &campaign); code != http.StatusOK {
+		t.Fatalf("get campaign code=%d", code)
+	}
+	if campaign.TotalCount != 8 || campaign.PendingCount != 7 || campaign.SuppressedCount != 1 {
+		t.Fatalf("unexpected campaign counts: %+v", campaign)
+	}
+	counts := map[string]int{}
+	for _, sender := range campaign.Senders {
+		counts[sender.MailboxID] = sender.Count
+	}
+	if counts[primary.ID] != 3 || counts[secondary.ID] != 2 || counts[tertiary.ID] != 2 {
+		t.Fatalf("sender distribution=%v, want 3/2/2", counts)
+	}
+}
+
+func TestCampaignPauseResumeControlsDispatch(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return now }
+	a.updateConfig(func(cfg *Config) {
+		cfg.SMTPHost = "127.0.0.1"
+		cfg.SMTPPort = "1"
+		cfg.PublicBaseURL = "https://mail.example.test"
+	})
+
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	_, mailbox := defaultAdminUserAndMailbox(t, a)
+	var campaign Campaign
+	if code := admin.do("POST", "/api/admin/campaigns", map[string]any{
+		"mailboxIds":       []string{mailbox.ID},
+		"name":             "Pause and resume",
+		"subject":          "Pause test",
+		"text":             "Hello",
+		"ratePerMinute":    60,
+		"consentConfirmed": true,
+		"recipients": []map[string]string{
+			{"email": "one@example.test"},
+			{"email": "two@example.test"},
+		},
+	}, &campaign); code != http.StatusCreated {
+		t.Fatalf("create campaign code=%d", code)
+	}
+	if code := admin.do("POST", "/api/admin/campaigns/"+campaign.ID+"/start", nil, &campaign); code != http.StatusOK {
+		t.Fatalf("start campaign code=%d", code)
+	}
+	if code := admin.do("POST", "/api/admin/campaigns/"+campaign.ID+"/pause", nil, &campaign); code != http.StatusOK || campaign.Status != campaignStatusPaused {
+		t.Fatalf("pause campaign code=%d campaign=%+v", code, campaign)
+	}
+	if err := a.processCampaigns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var queueCount int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE source=?`, sendSourceCampaign).Scan(&queueCount); err != nil {
+		t.Fatal(err)
+	}
+	if queueCount != 0 {
+		t.Fatalf("paused campaign queued %d messages", queueCount)
+	}
+	if code := admin.do("POST", "/api/admin/campaigns/"+campaign.ID+"/resume", nil, &campaign); code != http.StatusOK || campaign.Status != campaignStatusRunning {
+		t.Fatalf("resume campaign code=%d campaign=%+v", code, campaign)
+	}
+	if err := a.processCampaigns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if err := a.processCampaigns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE source=?`, sendSourceCampaign).Scan(&queueCount); err != nil {
+		t.Fatal(err)
+	}
+	if queueCount != 2 {
+		t.Fatalf("resumed campaign queued %d messages, want 2", queueCount)
+	}
+}
+
+func TestCampaignRelayDeliveryAndFailureRetry(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return now }
+	a.updateConfig(func(cfg *Config) {
+		cfg.SMTPHost = "127.0.0.1"
+		cfg.SMTPPort = "1"
+		cfg.PublicBaseURL = "https://mail.example.test"
+	})
+
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	_, mailbox := defaultAdminUserAndMailbox(t, a)
+	var campaign Campaign
+	if code := admin.do("POST", "/api/admin/campaigns", map[string]any{
+		"mailboxIds":       []string{mailbox.ID},
+		"name":             "Relay retry",
+		"subject":          "Relay test",
+		"text":             "Hello through relay",
+		"ratePerMinute":    300,
+		"consentConfirmed": true,
+		"recipients":       []map[string]string{{"email": "relay@example.test"}},
+	}, &campaign); code != http.StatusCreated {
+		t.Fatalf("create campaign code=%d", code)
+	}
+	if code := admin.do("POST", "/api/admin/campaigns/"+campaign.ID+"/start", nil, &campaign); code != http.StatusOK {
+		t.Fatalf("start campaign code=%d", code)
+	}
+	if err := a.processCampaigns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var queueID, status string
+	var attempts int
+	if err := a.db.QueryRow(`SELECT id,status,attempt_count FROM send_queue WHERE source=?`, sendSourceCampaign).Scan(&queueID, &status, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusFailed || attempts != 1 {
+		t.Fatalf("initial relay status=%q attempts=%d", status, attempts)
+	}
+
+	host, port, received := startCapturingSMTP(t, 1)
+	a.updateConfig(func(cfg *Config) {
+		cfg.SMTPHost = host
+		cfg.SMTPPort = port
+	})
+	now = now.Add(30 * time.Second)
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		if !strings.Contains(body, "To: relay@example.test") || strings.Contains(body, "Bcc:") {
+			t.Fatalf("unexpected relayed campaign body: %s", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retried campaign message was not relayed")
+	}
+	if err := a.processCampaigns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRow(`SELECT status,attempt_count FROM send_queue WHERE id=?`, queueID).Scan(&status, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered || attempts != 2 {
+		t.Fatalf("retried relay status=%q attempts=%d", status, attempts)
+	}
+	if err := a.db.QueryRow(`SELECT status,delivered_count,failed_count FROM campaigns WHERE id=?`, campaign.ID).Scan(&campaign.Status, &campaign.DeliveredCount, &campaign.FailedCount); err != nil {
+		t.Fatal(err)
+	}
+	if campaign.Status != campaignStatusCompleted || campaign.DeliveredCount != 1 || campaign.FailedCount != 0 {
+		t.Fatalf("unexpected completed campaign: %+v", campaign)
 	}
 }
 

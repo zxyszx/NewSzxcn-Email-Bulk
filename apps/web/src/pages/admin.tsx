@@ -2786,6 +2786,7 @@ function DomainSelect({ domains, value, onChange }: { domains: Domain[]; value: 
 
 type CampaignPageTab = "campaigns" | "suppressions"
 type RecipientTab = "sending" | "delivered" | "failed"
+type CampaignStatusFilter = "all" | Campaign["status"]
 
 export function CampaignsSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   const qc = useQueryClient()
@@ -2795,6 +2796,8 @@ export function CampaignsSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   const [tab, setTab] = React.useState<CampaignPageTab>("campaigns")
   const [createOpen, setCreateOpen] = React.useState(false)
   const [detailId, setDetailId] = React.useState("")
+  const [campaignQuery, setCampaignQuery] = React.useState("")
+  const [statusFilter, setStatusFilter] = React.useState<CampaignStatusFilter>("all")
   const campaigns = useQuery({ queryKey: ["admin", "campaigns"], queryFn: api.campaigns, refetchInterval: 5000 })
   const suppressions = useQuery({ queryKey: ["admin", "campaign-suppressions"], queryFn: api.campaignSuppressions, enabled: tab === "suppressions" })
   const action = useMutation({
@@ -2807,11 +2810,19 @@ export function CampaignsSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   })
   const items = campaigns.data?.items || []
   const totals = React.useMemo(() => items.reduce((sum, item) => ({ total: sum.total + item.totalCount, delivered: sum.delivered + item.deliveredCount, failed: sum.failed + item.failedCount, active: sum.active + (item.status === "running" || item.status === "scheduled" ? 1 : 0) }), { total: 0, delivered: 0, failed: 0, active: 0 }), [items])
+  const filteredItems = React.useMemo(() => {
+    const query = campaignQuery.trim().toLocaleLowerCase()
+    return items.filter((item) => {
+      if (statusFilter !== "all" && item.status !== statusFilter) return false
+      if (!query) return true
+      return [item.name, item.subject, item.mailboxAddress].some((value) => value?.toLocaleLowerCase().includes(query))
+    })
+  }, [items, campaignQuery, statusFilter])
 
   return <div className="space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
       <div className="inline-flex h-9 rounded-md border bg-muted/30 p-0.5">
-        <Button type="button" size="sm" variant={tab === "campaigns" ? "secondary" : "ghost"} className="h-8" onClick={() => setTab("campaigns")}><Megaphone className="mr-2 h-4 w-4" />发送活动</Button>
+        <Button type="button" size="sm" variant={tab === "campaigns" ? "secondary" : "ghost"} className="h-8" onClick={() => setTab("campaigns")}><Megaphone className="mr-2 h-4 w-4" />活动列表</Button>
         <Button type="button" size="sm" variant={tab === "suppressions" ? "secondary" : "ghost"} className="h-8" onClick={() => setTab("suppressions")}><ShieldCheck className="mr-2 h-4 w-4" />退订名单</Button>
       </div>
       {tab === "campaigns" && canManage && <Button type="button" onClick={() => setCreateOpen(true)}><Send className="mr-2 h-4 w-4" />新建群发</Button>}
@@ -2824,6 +2835,25 @@ export function CampaignsSection({ mailboxes }: { mailboxes: MailboxType[] }) {
         <CampaignMetric label="发送完成" value={totals.delivered} icon={<CheckCircle2 />} tone="success" />
         <CampaignMetric label="发送失败" value={totals.failed} icon={<AlertCircle />} tone={totals.failed > 0 ? "danger" : "default"} />
       </div>
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/[0.12] p-2 sm:flex-row sm:items-center">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={campaignQuery} onChange={(event) => setCampaignQuery(event.target.value)} placeholder="搜索活动名称、主题或发件人" className="h-9 bg-background pl-9" />
+        </div>
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as CampaignStatusFilter)}>
+          <SelectTrigger className="h-9 w-full bg-background sm:w-36" aria-label="筛选活动状态"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="draft">草稿</SelectItem>
+            <SelectItem value="scheduled">待发送</SelectItem>
+            <SelectItem value="running">发送中</SelectItem>
+            <SelectItem value="paused">已暂停</SelectItem>
+            <SelectItem value="completed">已完成</SelectItem>
+            <SelectItem value="canceled">已取消</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button type="button" size="icon" variant="outline" className="h-9 w-9 shrink-0" title="刷新活动列表" aria-label="刷新活动列表" disabled={campaigns.isFetching} onClick={() => { void campaigns.refetch() }}><RefreshCcw className={cn("h-4 w-4", campaigns.isFetching && "animate-spin")} /></Button>
+      </div>
       {campaigns.isPending && <Skeleton className="h-72 w-full" />}
       {campaigns.isError && <QueryFailure error={campaigns.error} onRetry={() => campaigns.refetch()} />}
       {!campaigns.isPending && !campaigns.isError && <div className="overflow-hidden rounded-lg border">
@@ -2831,7 +2861,8 @@ export function CampaignsSection({ mailboxes }: { mailboxes: MailboxType[] }) {
           <span>活动</span><span>发件人</span><span>状态</span><span>进度</span><span>发送速度</span><span className="text-right">操作</span>
         </div>
         {items.length === 0 && <div className="grid min-h-48 place-items-center px-4 text-sm text-muted-foreground">暂无群发活动</div>}
-        {items.map((item) => <div key={item.id} className="grid gap-3 border-b px-3 py-3 last:border-b-0 lg:grid-cols-[minmax(180px,1.4fr)_minmax(140px,1fr)_92px_150px_132px_112px] lg:items-center">
+        {items.length > 0 && filteredItems.length === 0 && <div className="grid min-h-48 place-items-center px-4 py-8 text-center"><div><div className="font-medium">没有匹配的活动</div><Button type="button" variant="link" className="mt-1" onClick={() => { setCampaignQuery(""); setStatusFilter("all") }}>清除筛选</Button></div></div>}
+        {filteredItems.map((item) => <div key={item.id} className="grid gap-3 border-b px-3 py-3 last:border-b-0 lg:grid-cols-[minmax(180px,1.4fr)_minmax(140px,1fr)_92px_150px_132px_112px] lg:items-center">
           <Button type="button" variant="ghost" className="h-auto min-w-0 justify-start p-0 text-left font-normal" onClick={() => setDetailId(item.id)}><span className="min-w-0"><span className="block truncate font-medium hover:underline">{item.name}</span><span className="block truncate text-xs text-muted-foreground">{item.subject}</span></span></Button>
           <div className="min-w-0"><div className="truncate text-sm">{item.senderCount > 1 ? `${item.senderCount} 个邮箱自动分配` : item.mailboxAddress}</div><div className="text-xs text-muted-foreground">共 {item.totalCount} 位收件人</div></div>
           <CampaignStatusBadge status={item.status} />
@@ -2911,22 +2942,49 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
       toast({ title: "文件读取失败" })
     }
   }
-  return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) setBodyExpanded(false); onOpenChange(nextOpen) }}><DialogContent className={cn("flex max-h-[92svh] max-w-5xl flex-col overflow-hidden p-0", bodyExpanded && "h-svh w-screen max-h-none max-w-none rounded-none")}><DialogHeader className="border-b px-5 py-4"><DialogTitle>新建群发活动</DialogTitle></DialogHeader><ScrollArea className="min-h-0 flex-1"><div className="grid gap-5 p-5 lg:grid-cols-2">
-    <div className="space-y-4">
-      <Field label="活动名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：8 月产品通知" />
-      <Field label="邮件主题" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="收件人看到的主题" />
-      <div className="space-y-2"><Label>邮件正文</Label><CampaignBodyEditor value={body} expanded={bodyExpanded} onExpandedChange={setBodyExpanded} onChange={setBody} /></div>
-      <div className="grid grid-cols-2 gap-3"><Field label="每分钟发送" type="number" min={1} max={300} value={rate} onChange={(event) => setRate(Math.max(1, Math.min(300, Number(event.target.value) || 1)))} /><Field label="定时发送（可选）" required={false} type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></div>
-    </div>
-    <div className="space-y-4">
-      <div className="space-y-2"><div className="flex items-center justify-between"><Label>发件人</Label><Button type="button" size="sm" variant="ghost" onClick={() => setMailboxIds(mailboxIds.length === mailboxes.length ? [] : mailboxes.map((item) => item.id))}>{mailboxIds.length === mailboxes.length ? "取消全选" : "全选"}</Button></div><div className={cn("grid grid-cols-1 gap-1 rounded-md border p-2 sm:grid-cols-2", sendersExpanded && "max-h-44 overflow-y-auto")}>{visibleMailboxes.map((mailbox) => <label key={mailbox.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-muted"><Checkbox checked={mailboxIds.includes(mailbox.id)} onCheckedChange={(checked) => toggleMailbox(mailbox.id, checked === true)} /><span className="min-w-0 flex-1 truncate" title={mailbox.address}>{mailbox.address}</span>{mailboxIds.includes(mailbox.id) && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">预计发送 {senderAllocation(mailbox.id)} 封</span>}</label>)}</div>{mailboxes.length > 4 && <Button type="button" size="sm" variant="ghost" className="h-8 w-full text-xs text-muted-foreground" aria-expanded={sendersExpanded} onClick={() => setSendersExpanded((current) => !current)}><ChevronDown className={cn("mr-1 h-3.5 w-3.5 transition-transform", sendersExpanded && "rotate-180")} />{sendersExpanded ? "收起发件人" : `查看全部发件人 (${mailboxes.length})`}</Button>}<div className="text-xs text-muted-foreground">已选 {mailboxIds.length} 位发件人，{parsed.items.length} 位收件人会自动均匀分配；余数按所选顺序每人多发 1 封。</div></div>
-      <div className="space-y-2"><div className="flex items-center justify-between gap-2"><div><Label htmlFor="campaign-recipients">收件人</Label><p className="mt-1 text-xs text-muted-foreground">每行只填写一个邮箱账号，无需姓名。</p></div><div><Input ref={fileRef} className="hidden" type="file" accept=".csv,text/csv" onChange={(event) => { void readCSV(event.target.files?.[0]); event.target.value = "" }} /><Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />导入 CSV</Button></div></div><Textarea id="campaign-recipients" className="min-h-[180px] resize-y font-mono text-xs" value={recipientText} onChange={(event) => setRecipientText(event.target.value)} placeholder={'zhangsan@example.com\nlisi@example.com'} /><div className="grid grid-cols-3 gap-2 text-xs"><span className="rounded bg-emerald-500/10 px-2 py-1.5 text-emerald-700">有效 {parsed.items.length}</span><span className="rounded bg-muted px-2 py-1.5 text-muted-foreground">重复 {parsed.duplicates}</span><span className={cn("rounded px-2 py-1.5", parsed.invalid ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>无效 {parsed.invalid}</span></div></div>
-      <label className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-3"><Checkbox checked={consent} onCheckedChange={(checked) => setConsent(checked === true)} /><span className="text-sm leading-5">确认名单中的收件人已明确同意接收此类邮件，并接受邮件自动附加退订链接。</span></label>
-    </div>
-  </div></ScrollArea><DialogFooter className="border-t px-5 py-4"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button><Button type="button" variant="secondary" disabled={!ready || create.isPending} onClick={() => create.mutate({ start: false })}>保存草稿</Button><Button type="button" disabled={!ready || !consent || create.isPending} onClick={() => create.mutate({ start: true })}>{create.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}开始发送</Button></DialogFooter></DialogContent></Dialog>
+  return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) { setBodyExpanded(false); setSendersExpanded(false) } onOpenChange(nextOpen) }}>
+    <DialogContent className="flex h-[96svh] max-h-[96svh] max-w-5xl flex-col overflow-hidden p-0">
+      <DialogHeader className="border-b px-5 py-3"><DialogTitle>新建群发活动</DialogTitle></DialogHeader>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="grid gap-5 p-5 lg:h-full lg:min-h-0 lg:grid-cols-2">
+          <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
+            <div className="space-y-4 lg:grid lg:h-32 lg:grid-cols-2 lg:content-start lg:gap-3 lg:space-y-0">
+              <Field label="活动名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：8 月产品通知" />
+              <Field label="邮件主题" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="收件人看到的主题" />
+            </div>
+            <div className={cn("space-y-2 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:space-y-0", !bodyExpanded && "lg:pb-9")}>
+              <div className="lg:flex lg:h-10 lg:items-start"><Label>邮件正文</Label></div>
+              <CampaignBodyEditor value={body} expanded={bodyExpanded} onExpandedChange={setBodyExpanded} onChange={setBody} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 lg:!mt-auto lg:h-[68px]">
+              <Field label="每分钟发送" type="number" min={1} max={300} value={rate} onChange={(event) => setRate(Math.max(1, Math.min(300, Number(event.target.value) || 1)))} />
+              <Field label="定时发送（可选）" required={false} type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />
+            </div>
+          </div>
+
+          <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
+            <div className="space-y-2 lg:h-32">
+              <div className="flex items-center justify-between"><Label>发件人</Label><Button type="button" size="sm" variant="ghost" onClick={() => setMailboxIds(mailboxIds.length === mailboxes.length ? [] : mailboxes.map((item) => item.id))}>{mailboxIds.length === mailboxes.length ? "取消全选" : "全选"}</Button></div>
+              <div className={cn("grid grid-cols-1 gap-1 rounded-md border p-2 sm:grid-cols-2", sendersExpanded && "max-h-44 overflow-y-auto")}>{visibleMailboxes.map((mailbox) => <label key={mailbox.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-muted"><Checkbox checked={mailboxIds.includes(mailbox.id)} onCheckedChange={(checked) => toggleMailbox(mailbox.id, checked === true)} /><span className="min-w-0 flex-1 truncate" title={mailbox.address}>{mailbox.address}</span>{mailboxIds.includes(mailbox.id) && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">预计发送 {senderAllocation(mailbox.id)} 封</span>}</label>)}</div>
+              {mailboxes.length > 4 && <Button type="button" size="sm" variant="ghost" className="h-8 w-full text-xs text-muted-foreground" aria-expanded={sendersExpanded} onClick={() => setSendersExpanded((current) => !current)}><ChevronDown className={cn("mr-1 h-3.5 w-3.5 transition-transform", sendersExpanded && "rotate-180")} />{sendersExpanded ? "收起发件人" : `查看全部发件人 (${mailboxes.length})`}</Button>}
+              <div className="text-xs text-muted-foreground">已选 {mailboxIds.length} 位发件人，{parsed.items.length} 位收件人会自动均匀分配；余数按所选顺序每人多发 1 封。</div>
+            </div>
+            <div className="space-y-2 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:space-y-0">
+              <div className="flex items-start justify-between gap-2 lg:h-10"><div className="flex flex-col items-start"><Label htmlFor="campaign-recipients">收件人</Label><p className="mt-1 text-xs text-muted-foreground">每行只填写一个邮箱账号，无需姓名。</p></div><div><Input ref={fileRef} className="hidden" type="file" accept=".csv,text/csv" onChange={(event) => { void readCSV(event.target.files?.[0]); event.target.value = "" }} /><Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />导入 CSV</Button></div></div>
+              <Textarea id="campaign-recipients" className="min-h-[180px] resize-y font-mono text-xs lg:min-h-0 lg:flex-1 lg:resize-none" value={recipientText} onChange={(event) => setRecipientText(event.target.value)} placeholder={'zhangsan@example.com\nlisi@example.com'} />
+              <div className="grid grid-cols-3 gap-2 text-xs"><span className="rounded bg-emerald-500/10 px-2 py-1.5 text-emerald-700">有效 {parsed.items.length}</span><span className="rounded bg-muted px-2 py-1.5 text-muted-foreground">重复 {parsed.duplicates}</span><span className={cn("rounded px-2 py-1.5", parsed.invalid ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>无效 {parsed.invalid}</span></div>
+            </div>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-3 lg:h-[68px] lg:min-h-[68px]"><Checkbox checked={consent} onCheckedChange={(checked) => setConsent(checked === true)} /><span className="text-sm leading-5">确认名单中的收件人已明确同意接收此类邮件，并接受邮件自动附加退订链接。</span></label>
+          </div>
+        </div>
+      </div>
+      <DialogFooter className="border-t px-5 py-3"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button><Button type="button" variant="secondary" disabled={!ready || create.isPending} onClick={() => create.mutate({ start: false })}>保存草稿</Button><Button type="button" disabled={!ready || !consent || create.isPending} onClick={() => create.mutate({ start: true })}>{create.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}开始发送</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>
 }
 
 function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { value: { text: string; html: string }; expanded: boolean; onExpandedChange: (expanded: boolean) => void; onChange: (value: { text: string; html: string }) => void }) {
+  const [viewMode, setViewMode] = React.useState<"content" | "preview">("content")
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false }),
@@ -2937,7 +2995,7 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
     content: value.html || "<p></p>",
     editorProps: {
       attributes: {
-        class: "mail-html min-h-[180px] w-full px-3 py-3 text-sm leading-6 outline-none [overflow-wrap:anywhere]",
+        class: "mail-html min-h-[160px] w-full px-3 py-3 text-sm leading-6 outline-none [overflow-wrap:anywhere] lg:min-h-0",
         "aria-label": "邮件正文",
         spellcheck: "true",
       },
@@ -2961,28 +3019,40 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
     editor.chain().focus().extendMarkRange("link").setLink({ href }).run()
   }
 
-  return <div className="overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
-    <div className="flex min-h-11 flex-wrap items-center gap-1 border-b bg-muted/30 px-2 py-1.5" aria-label="正文格式工具栏">
+  return <div className="overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+    <div className="flex h-10 items-stretch justify-between gap-2 border-b px-2">
+      <div className="flex items-stretch" aria-label="群发正文视图">
+        {([['content', '内容'], ['preview', '预览']] as const).map(([mode, label]) => (
+          <Button key={mode} type="button" variant="ghost" size="sm" className={cn("relative h-10 rounded-none px-3 font-medium text-muted-foreground hover:bg-transparent hover:text-foreground", viewMode === mode && "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-foreground")} aria-pressed={viewMode === mode} onMouseDown={(event) => event.preventDefault()} onClick={() => setViewMode(mode)}>{label}</Button>
+        ))}
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="whitespace-nowrap px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">{value.text.replace(/\s/g, "").length} 字</span>
+        <Button type="button" size="icon" variant={expanded ? "secondary" : "ghost"} className="h-8 w-8 shrink-0" title={expanded ? "还原群发正文" : "放大群发正文"} aria-label={expanded ? "还原群发正文" : "放大群发正文"} aria-pressed={expanded} onMouseDown={(event) => event.preventDefault()} onClick={() => onExpandedChange(!expanded)}>
+          {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </Button>
+      </div>
+    </div>
+    {viewMode === "content" && <div className="flex min-h-11 flex-wrap items-center gap-0 border-b bg-muted/30 px-2 py-1.5" aria-label="正文格式工具栏">
       <CampaignToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 /></CampaignToolbarButton>
       <CampaignToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 /></CampaignToolbarButton>
-      <Separator orientation="vertical" className="mx-1 h-6" />
+      <Separator orientation="vertical" className="mx-0.5 h-6" />
       <CampaignToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser /></CampaignToolbarButton>
       <CampaignToolbarButton label="加粗" active={editor?.isActive("bold")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></CampaignToolbarButton>
       <CampaignToolbarButton label="斜体" active={editor?.isActive("italic")} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></CampaignToolbarButton>
       <CampaignToolbarButton label="下划线" active={editor?.isActive("underline")} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline /></CampaignToolbarButton>
       <CampaignToolbarButton label="删除线" active={editor?.isActive("strike")} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough /></CampaignToolbarButton>
       <CampaignToolbarButton label="链接" active={editor?.isActive("link")} disabled={!editor} onClick={toggleLink}><Link /></CampaignToolbarButton>
-      <Separator orientation="vertical" className="mx-1 h-6" />
+      <Separator orientation="vertical" className="mx-0.5 h-6" />
       <CampaignToolbarButton label="无序列表" active={editor?.isActive("bulletList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List /></CampaignToolbarButton>
       <CampaignToolbarButton label="有序列表" active={editor?.isActive("orderedList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered /></CampaignToolbarButton>
       <CampaignToolbarButton label="左对齐" active={editor?.isActive({ textAlign: "left" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("left").run()}><AlignLeft /></CampaignToolbarButton>
       <CampaignToolbarButton label="居中" active={editor?.isActive({ textAlign: "center" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("center").run()}><AlignCenter /></CampaignToolbarButton>
       <CampaignToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight /></CampaignToolbarButton>
-      <span className="ml-auto whitespace-nowrap px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">{value.text.replace(/\s/g, "").length} 字</span>
-      <CampaignToolbarButton label={expanded ? "还原编辑窗口" : "放大编辑窗口"} active={expanded} onClick={() => onExpandedChange(!expanded)}>{expanded ? <Minimize2 /> : <Maximize2 />}</CampaignToolbarButton>
-    </div>
-    <div className={cn("max-h-[260px] min-h-[180px] overflow-y-auto [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6", expanded && "max-h-none min-h-[calc(100svh-18rem)]")}>
-      <EditorContent editor={editor} />
+    </div>}
+    <div className="max-h-[220px] min-h-[160px] overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1 [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6">
+      <EditorContent editor={editor} className={cn(viewMode === "preview" && "hidden")} />
+      {viewMode === "preview" && <div className="mail-html min-h-full px-3 py-3 text-sm leading-6 [overflow-wrap:anywhere]" aria-label="群发邮件预览" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(editor?.getHTML() || "") || "<p></p>" }} />}
     </div>
   </div>
 }
