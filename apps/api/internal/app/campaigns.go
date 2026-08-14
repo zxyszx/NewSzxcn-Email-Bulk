@@ -92,15 +92,16 @@ type CampaignSuppression struct {
 }
 
 type campaignInput struct {
-	MailboxID        string   `json:"mailboxId"`
-	MailboxIDs       []string `json:"mailboxIds"`
-	Name             string   `json:"name"`
-	Subject          string   `json:"subject"`
-	Text             string   `json:"text"`
-	HTML             string   `json:"html"`
-	RatePerMinute    int      `json:"ratePerMinute"`
-	ScheduledAt      string   `json:"scheduledAt"`
-	ConsentConfirmed bool     `json:"consentConfirmed"`
+	MailboxID        string            `json:"mailboxId"`
+	MailboxIDs       []string          `json:"mailboxIds"`
+	Name             string            `json:"name"`
+	Subject          string            `json:"subject"`
+	Text             string            `json:"text"`
+	HTML             string            `json:"html"`
+	RatePerMinute    int               `json:"ratePerMinute"`
+	ScheduledAt      string            `json:"scheduledAt"`
+	ConsentConfirmed bool              `json:"consentConfirmed"`
+	Attachments      []AttachmentInput `json:"attachments"`
 	Recipients       []struct {
 		Email string `json:"email"`
 		Name  string `json:"name"`
@@ -117,6 +118,7 @@ type normalizedCampaignInput struct {
 	RatePerMinute    int
 	ScheduledAt      *time.Time
 	ConsentConfirmed bool
+	Attachments      []AttachmentInput
 	Recipients       []CampaignRecipient
 }
 
@@ -126,7 +128,8 @@ func (a *App) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	in, err := a.normalizeCampaignInput(r.Context(), req)
+	user := currentUser(r)
+	in, err := a.normalizeCampaignInput(r.Context(), user, req)
 	if err != nil {
 		badRequest(w, err)
 		return
@@ -144,7 +147,7 @@ func (a *App) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		scheduled = in.ScheduledAt.Format(time.RFC3339Nano)
 	}
 	_, err = tx.ExecContext(r.Context(), `INSERT INTO campaigns(id,user_id,mailbox_id,name,subject,body_text,body_html,status,rate_per_minute,consent_confirmed,total_count,pending_count,scheduled_at,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, campaignID, currentUser(r).ID, in.MailboxID, in.Name, in.Subject, in.Text, in.HTML, campaignStatusDraft, in.RatePerMinute, boolInt(in.ConsentConfirmed), len(in.Recipients), len(in.Recipients), scheduled, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, campaignID, user.ID, in.MailboxID, in.Name, in.Subject, in.Text, in.HTML, campaignStatusDraft, in.RatePerMinute, boolInt(in.ConsentConfirmed), len(in.Recipients), len(in.Recipients), scheduled, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to create campaign")
 		return
@@ -155,6 +158,10 @@ func (a *App) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := insertCampaignSenders(r.Context(), tx, campaignID, in.MailboxIDs, now); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to add campaign senders")
+		return
+	}
+	if err := insertCampaignAttachments(r.Context(), tx, campaignID, in.Attachments, now); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to add campaign attachments")
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -181,7 +188,7 @@ func (a *App) handleUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	in, err := a.normalizeCampaignInput(r.Context(), req)
+	in, err := a.normalizeCampaignInput(r.Context(), currentUser(r), req)
 	if err != nil {
 		badRequest(w, err)
 		return
@@ -215,12 +222,20 @@ func (a *App) handleUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to update senders")
 		return
 	}
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM campaign_attachments WHERE campaign_id=?`, id); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update attachments")
+		return
+	}
 	if err := insertCampaignRecipients(r.Context(), tx, id, in.Recipients, now); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update recipients")
 		return
 	}
 	if err := insertCampaignSenders(r.Context(), tx, id, in.MailboxIDs, now); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update senders")
+		return
+	}
+	if err := insertCampaignAttachments(r.Context(), tx, id, in.Attachments, now); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update attachments")
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -231,7 +246,7 @@ func (a *App) handleUpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, campaign)
 }
 
-func (a *App) normalizeCampaignInput(ctx context.Context, req campaignInput) (normalizedCampaignInput, error) {
+func (a *App) normalizeCampaignInput(ctx context.Context, user *User, req campaignInput) (normalizedCampaignInput, error) {
 	var out normalizedCampaignInput
 	seenMailboxes := map[string]bool{}
 	mailboxIDs := append([]string{}, req.MailboxIDs...)
@@ -287,6 +302,14 @@ func (a *App) normalizeCampaignInput(ctx context.Context, req campaignInput) (no
 		return out, errors.New("发送速度必须在每分钟 1 至 300 封之间")
 	}
 	out.ConsentConfirmed = req.ConsentConfirmed
+	attachments, err := normalizeCampaignAttachments(req.Attachments)
+	if err != nil {
+		return out, err
+	}
+	if err := validateAttachmentLimit(attachments, userLimits(user)); err != nil {
+		return out, err
+	}
+	out.Attachments = attachments
 	if value := strings.TrimSpace(req.ScheduledAt); value != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, value)
 		if err != nil {
@@ -357,6 +380,34 @@ func (a *App) normalizeCampaignInput(ctx context.Context, req campaignInput) (no
 	return out, nil
 }
 
+func normalizeCampaignAttachments(attachments []AttachmentInput) ([]AttachmentInput, error) {
+	out := make([]AttachmentInput, 0, len(attachments))
+	for _, attachment := range attachments {
+		item := AttachmentInput{
+			Filename:      strings.TrimSpace(attachment.Filename),
+			ContentType:   strings.TrimSpace(attachment.ContentType),
+			ContentBase64: strings.TrimSpace(attachment.ContentBase64),
+		}
+		if item.Filename == "" {
+			return nil, errors.New("附件名称不能为空")
+		}
+		if len([]rune(item.Filename)) > 255 || hasHeaderBreak(item.Filename) {
+			return nil, errors.New("附件名称无效")
+		}
+		if item.ContentType == "" {
+			item.ContentType = "application/octet-stream"
+		}
+		if item.ContentBase64 == "" {
+			return nil, fmt.Errorf("%w: empty attachment content", errInvalidMIME)
+		}
+		if _, err := decodedBase64Len(item.ContentBase64); err != nil {
+			return nil, fmt.Errorf("%w: %v", errInvalidMIME, err)
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 func insertCampaignRecipients(ctx context.Context, tx *sql.Tx, campaignID string, recipients []CampaignRecipient, now time.Time) error {
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO campaign_recipients(id,campaign_id,mailbox_id,email,name,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`)
 	if err != nil {
@@ -380,6 +431,28 @@ func insertCampaignSenders(ctx context.Context, tx *sql.Tx, campaignID string, m
 	defer stmt.Close()
 	for index, mailboxID := range mailboxIDs {
 		if _, err := stmt.ExecContext(ctx, campaignID, mailboxID, index, now.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertCampaignAttachments(ctx context.Context, tx *sql.Tx, campaignID string, attachments []AttachmentInput, now time.Time) error {
+	if len(attachments) == 0 {
+		return nil
+	}
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO campaign_attachments(id,campaign_id,filename,content_type,content_base64,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	created := now.Format(time.RFC3339Nano)
+	for _, item := range attachments {
+		sizeBytes, err := decodedBase64Len(item.ContentBase64)
+		if err != nil {
+			return err
+		}
+		if _, err := stmt.ExecContext(ctx, newID("cat"), campaignID, item.Filename, item.ContentType, item.ContentBase64, sizeBytes, created); err != nil {
 			return err
 		}
 	}
@@ -518,7 +591,7 @@ func (a *App) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if unreadyDomains > 0 {
-			badRequest(w, errors.New("发件域名尚未通过 MX、SPF、DKIM、DMARC 和 PTR 检测，请先在域名管理中完成检查"))
+			badRequest(w, errors.New("发件域名尚未通过 MX、SPF、DKIM、DMARC 检测，请先在域名管理中完成检查"))
 			return
 		}
 	}
@@ -748,8 +821,12 @@ func (a *App) dispatchCampaign(ctx context.Context, campaignID string, rate int,
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	attachments, err := a.campaignAttachments(ctx, campaignID)
+	if err != nil {
+		return err
+	}
 	for _, recipient := range recipients {
-		queueID, err := a.enqueueCampaignRecipient(ctx, campaignID, recipient, now)
+		queueID, err := a.enqueueCampaignRecipient(ctx, campaignID, recipient, attachments, now)
 		if err != nil {
 			_, _ = a.db.ExecContext(ctx, `UPDATE campaign_recipients SET status='failed',last_error=?,updated_at=? WHERE id=? AND status='pending'`, truncateCampaignError(err.Error()), now.Format(time.RFC3339Nano), recipient.ID)
 		} else {
@@ -764,7 +841,24 @@ func (a *App) dispatchCampaign(ctx context.Context, campaignID string, rate int,
 	return err
 }
 
-func (a *App) enqueueCampaignRecipient(ctx context.Context, campaignID string, recipient CampaignRecipient, now time.Time) (string, error) {
+func (a *App) campaignAttachments(ctx context.Context, campaignID string) ([]AttachmentInput, error) {
+	rows, err := a.db.QueryContext(ctx, `SELECT filename,content_type,content_base64 FROM campaign_attachments WHERE campaign_id=? ORDER BY created_at,id`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var attachments []AttachmentInput
+	for rows.Next() {
+		var item AttachmentInput
+		if err := rows.Scan(&item.Filename, &item.ContentType, &item.ContentBase64); err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, item)
+	}
+	return attachments, rows.Err()
+}
+
+func (a *App) enqueueCampaignRecipient(ctx context.Context, campaignID string, recipient CampaignRecipient, attachments []AttachmentInput, now time.Time) (string, error) {
 	var userID, mailboxID, mailboxAddress, fromName, subject, bodyText, bodyHTML string
 	err := a.db.QueryRowContext(ctx, `SELECT c.user_id,cr.mailbox_id,mb.address,mb.display_name,c.subject,c.body_text,c.body_html FROM campaigns c JOIN campaign_recipients cr ON cr.campaign_id=c.id JOIN mailboxes mb ON mb.id=cr.mailbox_id WHERE c.id=? AND cr.id=? AND c.status='running' AND mb.status='active'`, campaignID, recipient.ID).Scan(&userID, &mailboxID, &mailboxAddress, &fromName, &subject, &bodyText, &bodyHTML)
 	if err != nil {
@@ -779,7 +873,7 @@ func (a *App) enqueueCampaignRecipient(ctx context.Context, campaignID string, r
 	personalHTML := appendCampaignUnsubscribeHTML(bodyHTML, unsubscribeURL)
 	messageID := fmt.Sprintf("<campaign-%s@%s>", recipient.ID, strings.SplitN(mailboxAddress, "@", 2)[1])
 	mimeBytes, err := BuildMIME(MIMEMessage{
-		From: mailboxAddress, FromName: fromName, To: []string{recipient.Email}, Subject: subject, Text: personalText, HTML: personalHTML, MessageID: messageID, Date: now,
+		From: mailboxAddress, FromName: fromName, To: []string{recipient.Email}, Subject: subject, Text: personalText, HTML: personalHTML, MessageID: messageID, Date: now, Attachments: attachments,
 		Headers: map[string]string{
 			"List-Unsubscribe":      "<" + unsubscribeURL + ">",
 			"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",

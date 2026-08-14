@@ -5246,6 +5246,23 @@ func TestDNSRecords(t *testing.T) {
 	}
 }
 
+func TestDNSStatusIgnoresPTRWhenRequiredRecordsPass(t *testing.T) {
+	checks := map[string]DNSCheckStatus{
+		"mx":    {OK: true},
+		"spf":   {OK: true},
+		"dkim":  {OK: true},
+		"dmarc": {OK: true},
+		"ptr":   {OK: false},
+	}
+	if status := dnsStatusFromChecks(checks); status != "ok" {
+		t.Fatalf("status=%q, want ok", status)
+	}
+	checks["dkim"] = DNSCheckStatus{OK: false}
+	if status := dnsStatusFromChecks(checks); status != "error" {
+		t.Fatalf("status=%q, want error", status)
+	}
+}
+
 func TestDefaultMailLabelsBackfillOrderAndDeletion(t *testing.T) {
 	a := newTestApp(t)
 	var mailboxID string

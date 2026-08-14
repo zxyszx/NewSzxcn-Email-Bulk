@@ -42,6 +42,9 @@ func TestCampaignMultiSenderQueuesOneRecipientAndRetriesFailures(t *testing.T) {
 		"html":             "<p>Hello from the campaign</p>",
 		"ratePerMinute":    300,
 		"consentConfirmed": true,
+		"attachments": []map[string]string{
+			{"filename": "notice.txt", "contentType": "text/plain", "contentBase64": base64.StdEncoding.EncodeToString([]byte("campaign attachment"))},
+		},
 		"recipients": []map[string]string{
 			{"email": "first@example.test", "name": "First"},
 			{"email": "SECOND@example.test", "name": "Second"},
@@ -92,6 +95,9 @@ func TestCampaignMultiSenderQueuesOneRecipientAndRetriesFailures(t *testing.T) {
 			if !strings.Contains(mimeText, header) {
 				t.Fatalf("campaign MIME missing %q: %s", header, mimeText)
 			}
+		}
+		if !strings.Contains(mimeText, `Content-Disposition: attachment; filename="notice.txt"`) {
+			t.Fatalf("campaign MIME missing attachment: %s", mimeText)
 		}
 		mailboxCounts[mailboxID]++
 		queueCount++

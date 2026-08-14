@@ -145,7 +145,7 @@ export type DeliverabilitySettings = {
   callbackConfigured: boolean; relaySecretConfigured: boolean
 }
 export type DeliverabilitySettingsPayload = Pick<DeliverabilitySettings, "autoPause" | "complaintThreshold" | "bounceThreshold" | "minimumSample" | "circuitFailureThreshold" | "circuitMinutes">
-export type CampaignInput = { mailboxId?: string; mailboxIds: string[]; name: string; subject: string; text: string; html: string; ratePerMinute: number; scheduledAt?: string; consentConfirmed: boolean; recipients: { email: string }[] }
+export type CampaignInput = { mailboxId?: string; mailboxIds: string[]; name: string; subject: string; text: string; html: string; ratePerMinute: number; scheduledAt?: string; consentConfirmed: boolean; attachments?: SendPayload["attachments"]; recipients: { email: string }[] }
 export type CampaignSuppression = { id: string; email: string; reason: string; source: string; campaignId?: string; createdAt: string; updatedAt: string }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
 export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }
@@ -219,9 +219,6 @@ export type SystemVersion = {
   currentCommit?: string
   buildDate?: string
   latestVersion?: string
-  latestName?: string
-  releaseUrl?: string
-  releaseNotes?: string
   publishedAt?: string
   updateAvailable: boolean
   updateEnabled: boolean

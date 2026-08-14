@@ -10,7 +10,7 @@ import Placeholder from "@tiptap/extension-placeholder"
 import TextAlign from "@tiptap/extension-text-align"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlignCenter, AlignLeft, AlignRight, AlertCircle, Bold, CheckCircle2, ChevronDown, ChevronRight, Circle, ClipboardList, Clock3, Cloud, Copy, Database, Download, Eraser, ExternalLink, Eye, EyeOff, FileUp, Globe2, HardDrive, Image as ImageIcon, Italic, KeyRound, Link, List, ListOrdered, Loader2, Mail, Maximize2, Megaphone, Minimize2, MoreHorizontal, Pause, Pencil, Play, Plus, Redo2, RefreshCcw, RotateCcw, Search, Send, Server, ShieldCheck, Strikethrough, Trash2, Underline, Undo2, UserRound, UsersRound, XCircle } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, AlertCircle, Bold, CheckCircle2, ChevronDown, ChevronRight, Circle, ClipboardList, Clock3, Cloud, Copy, Database, Download, Eraser, ExternalLink, Eye, EyeOff, FileUp, Globe2, HardDrive, Image as ImageIcon, Italic, KeyRound, Link, List, ListOrdered, Loader2, Mail, Maximize2, Megaphone, Minimize2, MoreHorizontal, Paperclip, Pause, Pencil, Play, Plus, Redo2, RefreshCcw, RotateCcw, Search, Send, Server, ShieldCheck, Strikethrough, Trash2, Underline, Undo2, UserRound, UsersRound, XCircle } from "lucide-react"
 import { api, AdminOverview, AdminUser, Alias, Campaign, CampaignInput, CampaignRecipient, CampaignSuppression, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -2775,6 +2775,12 @@ const dnsCheckMeta: Record<string, { label: string; description: string }> = {
   dmarc: { label: "DMARC", description: "防伪策略" },
   ptr: { label: "PTR", description: "反向 DNS" },
 }
+const dnsCheckOrder = ["mx", "spf", "dkim", "dmarc", "ptr"]
+const requiredDNSCheckNames = ["mx", "spf", "dkim", "dmarc"]
+
+function isRequiredDNSCheck(name: string) {
+  return requiredDNSCheckNames.includes(name.toLowerCase())
+}
 
 function DNSCheckPending() {
   return <div className="mb-4 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4" role="status" aria-live="polite">
@@ -2792,39 +2798,40 @@ function DNSCheckFailure({ error }: { error: Error }) {
 
 function DNSCheckSummary({ checks }: { checks: Record<string, { ok: boolean; message: string; found?: string[] }> }) {
   const entries = Object.entries(checks).sort(([left], [right]) => {
-    const order = ["mx", "spf", "dkim", "dmarc", "ptr"]
-    return order.indexOf(left) - order.indexOf(right)
+    return dnsCheckOrder.indexOf(left) - dnsCheckOrder.indexOf(right)
   })
-  const passed = entries.filter(([, item]) => item.ok).length
-  const allPassed = entries.length > 0 && passed === entries.length
-  return <section className={cn("mb-4 overflow-hidden rounded-lg border p-4", allPassed ? "border-emerald-500/40 bg-emerald-500/[0.07]" : "border-destructive/40 bg-destructive/5")} role={allPassed ? "status" : "alert"} aria-live="polite" aria-label="DNS 检测结果">
+  const requiredEntries = entries.filter(([name]) => isRequiredDNSCheck(name))
+  const requiredPassed = requiredEntries.filter(([, item]) => item.ok).length
+  const allRequiredPassed = requiredEntries.length > 0 && requiredPassed === requiredEntries.length
+  const hasOptionalWarning = entries.some(([name, item]) => !isRequiredDNSCheck(name) && !item.ok)
+  return <section className={cn("mb-4 overflow-hidden rounded-lg border p-4", allRequiredPassed ? "border-emerald-500/40 bg-emerald-500/[0.07]" : "border-destructive/40 bg-destructive/5")} role={allRequiredPassed ? "status" : "alert"} aria-live="polite" aria-label="DNS 检测结果">
     <div className="flex items-start gap-3">
-      <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-full", allPassed ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-destructive/10 text-destructive")}>
-        {allPassed ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
+      <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-full", allRequiredPassed ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-destructive/10 text-destructive")}>
+        {allRequiredPassed ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className={cn("text-base font-semibold", allPassed ? "text-emerald-800 dark:text-emerald-300" : "text-destructive")}>{allPassed ? "DNS 配置全部通过" : "DNS 配置需要处理"}</h3>
-          <Badge variant="outline" className={cn("shrink-0 bg-background/70", allPassed ? "border-emerald-500/40 text-emerald-800 dark:text-emerald-300" : "border-destructive/40 text-destructive")}>{passed}/{entries.length} 项通过</Badge>
+          <h3 className={cn("text-base font-semibold", allRequiredPassed ? "text-emerald-800 dark:text-emerald-300" : "text-destructive")}>{allRequiredPassed ? "DNS 配置正常" : "DNS 配置需要处理"}</h3>
+          <Badge variant="outline" className={cn("shrink-0 bg-background/70", allRequiredPassed ? "border-emerald-500/40 text-emerald-800 dark:text-emerald-300" : "border-destructive/40 text-destructive")}>{requiredPassed}/{requiredEntries.length} 必需项通过</Badge>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{allPassed ? "所有邮件相关记录均已正确解析，可以正常使用。" : "请处理下面标红的项目，修改 DNS 后再重新检测。"}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{allRequiredPassed ? (hasOptionalWarning ? "MX、SPF、DKIM、DMARC 已通过；PTR 仅在本页提醒，使用中继时不影响发信。" : "邮件必需 DNS 记录均已正确解析，可以正常使用。") : "请处理下面标红的项目，修改 DNS 后再重新检测。"}</p>
       </div>
     </div>
     <div className="mt-3 grid gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
-      {entries.map(([name, item]) => <DNSCheckRow key={name} name={name} check={item} />)}
+      {entries.map(([name, item]) => <DNSCheckRow key={name} name={name} check={item} required={isRequiredDNSCheck(name)} />)}
     </div>
   </section>
 }
 
-function DNSCheckRow({ name, check }: { name: string; check: { ok: boolean; message: string; found?: string[] } }) {
+function DNSCheckRow({ name, check, required }: { name: string; check: { ok: boolean; message: string; found?: string[] }; required: boolean }) {
   const visibleRecords = check.found?.filter(Boolean) ?? []
   const meta = dnsCheckMeta[name.toLowerCase()] || { label: name.toUpperCase(), description: "DNS 记录" }
-  return <div className={cn("space-y-1 border-t py-2.5 text-sm", check.ok ? "border-emerald-500/20" : "border-destructive/20")}>
+  return <div className={cn("space-y-1 border-t py-2.5 text-sm", check.ok ? "border-emerald-500/20" : required ? "border-destructive/20" : "border-amber-500/25")}>
     <div className="flex items-start gap-2.5">
-      {check.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />}
+      {check.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" /> : <AlertCircle className={cn("mt-0.5 h-4 w-4 shrink-0", required ? "text-destructive" : "text-amber-600")} />}
       <div className="min-w-0 flex-1">
         <div className="shrink-0 font-medium text-foreground">{meta.label}<span className="ml-1 font-normal text-muted-foreground">({meta.description})</span></div>
-        <div className={cn("mt-0.5", check.ok ? "text-muted-foreground" : "font-medium text-destructive")}>{check.message}</div>
+        <div className={cn("mt-0.5", check.ok ? "text-muted-foreground" : required ? "font-medium text-destructive" : "font-medium text-amber-700 dark:text-amber-400")}>{check.message}</div>
       </div>
     </div>
     {!check.ok && visibleRecords.length > 0 && <div className="ml-6 rounded-md bg-background/70 px-3 py-2 font-mono text-xs text-muted-foreground">
@@ -3063,11 +3070,13 @@ function CampaignProgress({ item }: { item: Campaign }) {
 function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean; onOpenChange: (open: boolean) => void; mailboxes: MailboxType[] }) {
   const qc = useQueryClient()
   const { toast } = useToast()
-  const fileRef = React.useRef<HTMLInputElement>(null)
+  const user = useMe().data?.user
+  const csvFileRef = React.useRef<HTMLInputElement>(null)
   const [name, setName] = React.useState("")
   const [subject, setSubject] = React.useState("")
   const [body, setBody] = React.useState({ text: "", html: "" })
   const [recipientText, setRecipientText] = React.useState("")
+  const [files, setFiles] = React.useState<File[]>([])
   const [mailboxIds, setMailboxIds] = React.useState<string[]>([])
   const [rate, setRate] = React.useState(30)
   const [scheduledAt, setScheduledAt] = React.useState("")
@@ -3075,14 +3084,18 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
   const [sendersExpanded, setSendersExpanded] = React.useState(false)
   const [bodyExpanded, setBodyExpanded] = React.useState(false)
   const parsed = React.useMemo(() => parseCampaignRecipients(recipientText), [recipientText])
+  const maxAttachmentBytes = campaignAttachmentLimitBytes(user?.limits)
+  const maxAttachmentText = maxAttachmentBytes > 0 ? formatBytes(maxAttachmentBytes) : "不限"
   React.useEffect(() => { if (open && mailboxIds.length === 0 && mailboxes[0]) setMailboxIds([mailboxes[0].id]) }, [open, mailboxes, mailboxIds.length])
   const create = useMutation({
     mutationFn: async ({ start }: { start: boolean }) => {
-      const payload: CampaignInput = { mailboxIds, name, subject, text: body.text, html: body.html, ratePerMinute: rate, scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined, consentConfirmed: consent, recipients: parsed.items }
+      if (!attachmentsWithinLimit()) throw new Error("请移除超过上限的附件")
+      const attachments = files.length ? await Promise.all(files.map(fileToCampaignAttachment)) : []
+      const payload: CampaignInput = { mailboxIds, name, subject, text: body.text, html: body.html, ratePerMinute: rate, scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined, consentConfirmed: consent, attachments, recipients: parsed.items }
       const item = await api.createCampaign(payload)
       return start ? api.startCampaign(item.id) : item
     },
-    onSuccess: async (item) => { await qc.invalidateQueries({ queryKey: ["admin", "campaigns"] }); toast({ title: item.status === "draft" ? "草稿已保存" : item.status === "scheduled" ? "活动已设置定时发送" : "活动已启动" }); onOpenChange(false); setName(""); setSubject(""); setBody({ text: "", html: "" }); setRecipientText(""); setScheduledAt(""); setConsent(false) },
+    onSuccess: async (item) => { await qc.invalidateQueries({ queryKey: ["admin", "campaigns"] }); toast({ title: item.status === "draft" ? "草稿已保存" : item.status === "scheduled" ? "活动已设置定时发送" : "活动已启动" }); onOpenChange(false); setName(""); setSubject(""); setBody({ text: "", html: "" }); setRecipientText(""); setFiles([]); setScheduledAt(""); setConsent(false) },
     onError: (error) => toast({ title: "保存失败", description: error.message }),
   })
   const ready = mailboxIds.length > 0 && name.trim() && subject.trim() && campaignHtmlContainsMeaningfulContent(body.html, body.text) && parsed.items.length > 0
@@ -3093,6 +3106,21 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
     return Math.floor(parsed.items.length / mailboxIds.length) + (index < parsed.items.length % mailboxIds.length ? 1 : 0)
   }
   const toggleMailbox = (id: string, checked: boolean) => setMailboxIds((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id))
+  function addAttachmentFiles(nextFiles: File[]) {
+    if (!nextFiles.length) return
+    const allowed = maxAttachmentBytes > 0 ? nextFiles.filter((file) => file.size <= maxAttachmentBytes) : nextFiles
+    if (allowed.length < nextFiles.length) {
+      toast({ title: "附件超过配额上限", description: `当前单个附件上限 ${maxAttachmentText}` })
+    }
+    if (allowed.length) {
+      setFiles((current) => [...current, ...allowed])
+    }
+  }
+  function attachmentsWithinLimit() {
+    if (maxAttachmentBytes <= 0 || files.every((file) => file.size <= maxAttachmentBytes)) return true
+    toast({ title: "附件超过配额上限", description: `当前单个附件上限 ${maxAttachmentText}` })
+    return false
+  }
   async function readCSV(file?: File) {
     if (!file) return
     try {
@@ -3104,10 +3132,10 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
     }
   }
   return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) { setBodyExpanded(false); setSendersExpanded(false) } onOpenChange(nextOpen) }}>
-    <DialogContent className={cn("flex max-h-[88svh] w-[min(94vw,900px)] max-w-none flex-col overflow-hidden p-0", bodyExpanded && "h-[92svh] w-[min(96vw,1040px)]")}>
+    <DialogContent className={cn("flex max-h-[88svh] w-[min(94vw,900px)] max-w-none flex-col overflow-hidden p-0", bodyExpanded && "h-[92svh] w-[min(98vw,1120px)]")}>
       <DialogHeader className="border-b px-4 py-3"><DialogTitle>新建群发活动</DialogTitle></DialogHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(280px,0.92fr)]">
+        <div className={cn("grid gap-4 p-4", bodyExpanded ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1.08fr)_minmax(280px,0.92fr)]")}>
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="活动名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：8 月产品通知" />
@@ -3115,7 +3143,7 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
             </div>
             <div className="space-y-2">
               <Label>邮件正文</Label>
-              <CampaignBodyEditor value={body} expanded={bodyExpanded} onExpandedChange={setBodyExpanded} onChange={setBody} />
+              <CampaignBodyEditor value={body} expanded={bodyExpanded} files={files} maxAttachmentText={maxAttachmentText} onExpandedChange={setBodyExpanded} onChange={setBody} onPickFiles={addAttachmentFiles} onRemoveFile={(index) => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="每分钟发送" type="number" min={1} max={300} value={rate} onChange={(event) => setRate(Math.max(1, Math.min(300, Number(event.target.value) || 1)))} />
@@ -3123,7 +3151,7 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className={cn("space-y-4", bodyExpanded && "hidden")}>
             <div className="space-y-2">
               <div className="flex items-center justify-between"><Label>发件人</Label><Button type="button" size="sm" variant="ghost" onClick={() => setMailboxIds(mailboxIds.length === mailboxes.length ? [] : mailboxes.map((item) => item.id))}>{mailboxIds.length === mailboxes.length ? "取消全选" : "全选"}</Button></div>
               <div className={cn("grid grid-cols-1 gap-1 rounded-md border p-2", sendersExpanded && "max-h-44 overflow-y-auto")}>{visibleMailboxes.map((mailbox) => <label key={mailbox.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-muted"><Checkbox checked={mailboxIds.includes(mailbox.id)} onCheckedChange={(checked) => toggleMailbox(mailbox.id, checked === true)} /><span className="min-w-0 flex-1 truncate" title={mailbox.address}>{mailbox.address}</span>{mailboxIds.includes(mailbox.id) && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">预计发送 {senderAllocation(mailbox.id)} 封</span>}</label>)}</div>
@@ -3131,7 +3159,7 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
               <div className="text-xs text-muted-foreground">已选 {mailboxIds.length} 位发件人，{parsed.items.length} 位收件人会自动均匀分配；余数按所选顺序每人多发 1 封。</div>
             </div>
             <div className="space-y-2">
-              <div className="flex items-start justify-between gap-2"><div className="flex flex-col items-start"><Label htmlFor="campaign-recipients">收件人</Label><p className="mt-1 text-xs text-muted-foreground">每行只填写一个邮箱账号，无需姓名。</p></div><div><Input ref={fileRef} className="hidden" type="file" accept=".csv,text/csv" onChange={(event) => { void readCSV(event.target.files?.[0]); event.target.value = "" }} /><Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />导入 CSV</Button></div></div>
+              <div className="flex items-start justify-between gap-2"><div className="flex flex-col items-start"><Label htmlFor="campaign-recipients">收件人</Label><p className="mt-1 text-xs text-muted-foreground">每行只填写一个邮箱账号，无需姓名。</p></div><div><Input ref={csvFileRef} className="hidden" type="file" accept=".csv,text/csv" onChange={(event) => { void readCSV(event.target.files?.[0]); event.target.value = "" }} /><Button type="button" size="sm" variant="outline" onClick={() => csvFileRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />导入 CSV</Button></div></div>
               <Textarea id="campaign-recipients" className="h-[238px] resize-none font-mono text-xs" value={recipientText} onChange={(event) => setRecipientText(event.target.value)} placeholder={'zhangsan@example.com\nlisi@example.com'} />
               <div className="grid grid-cols-3 gap-2 text-xs"><span className="rounded bg-emerald-500/10 px-2 py-1.5 text-emerald-700">有效 {parsed.items.length}</span><span className="rounded bg-muted px-2 py-1.5 text-muted-foreground">重复 {parsed.duplicates}</span><span className={cn("rounded px-2 py-1.5", parsed.invalid ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>无效 {parsed.invalid}</span></div>
             </div>
@@ -3144,7 +3172,8 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
   </Dialog>
 }
 
-function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { value: { text: string; html: string }; expanded: boolean; onExpandedChange: (expanded: boolean) => void; onChange: (value: { text: string; html: string }) => void }) {
+function CampaignBodyEditor({ value, expanded, files, maxAttachmentText, onExpandedChange, onChange, onPickFiles, onRemoveFile }: { value: { text: string; html: string }; expanded: boolean; files: File[]; maxAttachmentText: string; onExpandedChange: (expanded: boolean) => void; onChange: (value: { text: string; html: string }) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
+  const attachmentInputRef = React.useRef<HTMLInputElement>(null)
   const [viewMode, setViewMode] = React.useState<"content" | "preview" | "html">("content")
   const [insertContent, setInsertContent] = React.useState<CampaignInsertContentState | null>(null)
   const editor = useEditor({
@@ -3209,6 +3238,7 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
   }
 
   return <div className="overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+    <Input ref={attachmentInputRef} type="file" multiple className="hidden" onChange={(event) => { onPickFiles(Array.from(event.target.files || [])); event.target.value = "" }} />
     <div className="flex h-10 items-stretch justify-between gap-2 border-b px-2">
       <div className="flex items-stretch" aria-label="群发正文视图">
         {([['content', '内容'], ['preview', '预览'], ['html', 'HTML']] as const).map(([mode, label]) => (
@@ -3233,11 +3263,14 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
+            <DropdownMenuItem className={campaignMenuItemClass} onSelect={() => attachmentInputRef.current?.click()}><Paperclip className="h-4 w-4" />附件</DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem className={campaignMenuItemClass} onSelect={() => openInsertDialog("link")}><Link className="h-4 w-4" />链接</DropdownMenuItem>
             <DropdownMenuItem className={campaignMenuItemClass} onSelect={() => openInsertDialog("image")}><ImageIcon className="h-4 w-4" />图片链接</DropdownMenuItem>
             <DropdownMenuItem className={campaignMenuItemClass} onSelect={() => editor?.chain().focus().setHorizontalRule().run()}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <span className="px-1 text-xs text-muted-foreground" title={`单个附件上限 ${maxAttachmentText}`}>附件上限 {maxAttachmentText}</span>
         <span className="ml-auto whitespace-nowrap px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">{value.text.replace(/\s/g, "").length} 字</span>
       </div>
       <div className="flex min-h-10 flex-wrap items-center gap-0 border-b bg-muted/30 px-2 py-1.5" aria-label="正文格式工具栏">
@@ -3255,11 +3288,25 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
         <CampaignToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight /></CampaignToolbarButton>
       </div>
     </>}
-    <div className={cn("h-[238px] overflow-y-auto [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6", expanded && "h-[calc(92svh-18rem)] min-h-[280px]")}>
+    <div className={cn("h-[238px] overflow-y-auto [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6", expanded && "h-[calc(92svh-19rem)] min-h-[360px]")}>
       <EditorContent editor={editor} className={cn(viewMode !== "content" && "hidden")} />
       {viewMode === "preview" && <div className="mail-html min-h-full px-3 py-3 text-sm leading-6 [overflow-wrap:anywhere]" aria-label="群发邮件预览" dangerouslySetInnerHTML={{ __html: sanitizeCampaignHtml(value.html || editor?.getHTML() || "") || "<p></p>" }} />}
       {viewMode === "html" && <Textarea className="min-h-full resize-none rounded-none border-0 px-3 py-3 font-mono text-xs leading-5 shadow-none focus-visible:ring-0" aria-label="群发 HTML 源码" value={value.html} onChange={(event) => updateRawHTML(event.target.value)} placeholder="<h1>标题</h1><p>正文</p><img src=&quot;https://example.com/banner.jpg&quot; alt=&quot;&quot;>" />}
     </div>
+    {files.length > 0 && (
+      <div className="flex flex-wrap gap-2 border-t bg-muted/20 px-3 py-2">
+        {files.map((file, index) => (
+          <Badge key={`${file.name}-${file.lastModified}-${index}`} variant="outline" className="max-w-full gap-1 rounded-md px-2 py-1 font-normal">
+            <Paperclip className="h-3.5 w-3.5 shrink-0" />
+            <span className="max-w-[220px] truncate" title={file.name}>{file.name}</span>
+            <span className="text-muted-foreground">{formatBytes(file.size)}</span>
+            <button type="button" className="ml-1 rounded-sm text-muted-foreground hover:text-foreground" aria-label={`移除附件 ${file.name}`} onClick={() => onRemoveFile(index)}>
+              <XCircle className="h-3.5 w-3.5" />
+            </button>
+          </Badge>
+        ))}
+      </div>
+    )}
     <CampaignInsertContentDialog state={insertContent} onOpenChange={(open) => { if (!open) setInsertContent(null) }} onConfirm={confirmInsert} />
   </div>
 }
@@ -3357,6 +3404,19 @@ function campaignHtmlToText(html: string) {
 
 function campaignHtmlContainsMeaningfulContent(html: string, text = "") {
   return text.trim().length > 0 || /<(img|hr|table|ul|ol|li|blockquote|pre|div)[\s>]/i.test(html)
+}
+
+function campaignAttachmentLimitBytes(limits?: PermissionLimits) {
+  const mb = limits?.maxAttachmentMb || 0
+  return mb > 0 ? mb * 1024 * 1024 : 0
+}
+
+async function fileToCampaignAttachment(file: File): Promise<NonNullable<CampaignInput["attachments"]>[number]> {
+  const buffer = await file.arrayBuffer()
+  let binary = ""
+  const bytes = new Uint8Array(buffer)
+  for (let index = 0; index < bytes.length; index++) binary += String.fromCharCode(bytes[index])
+  return { filename: file.name, contentType: file.type || "application/octet-stream", contentBase64: btoa(binary) }
 }
 
 function parseCampaignRecipients(raw: string): { items: { email: string }[]; duplicates: number; invalid: number } {

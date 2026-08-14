@@ -490,6 +490,16 @@ func (a *App) migrate(ctx context.Context) error {
 			PRIMARY KEY(campaign_id,mailbox_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_campaign_senders_mailbox ON campaign_senders(mailbox_id,campaign_id)`,
+		`CREATE TABLE IF NOT EXISTS campaign_attachments (
+			id TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+			filename TEXT NOT NULL,
+			content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+			content_base64 TEXT NOT NULL,
+			size_bytes INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaign_attachments_campaign ON campaign_attachments(campaign_id,created_at)`,
 		`CREATE TABLE IF NOT EXISTS campaign_recipients (
 			id TEXT PRIMARY KEY,
 			campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,

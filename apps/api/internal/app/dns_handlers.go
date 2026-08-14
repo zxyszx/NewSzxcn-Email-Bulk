@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+var requiredDNSChecks = []string{"mx", "spf", "dkim", "dmarc"}
+
 func (a *App) handleDNSRecords(w http.ResponseWriter, r *http.Request) {
 	domain, err := a.domainByID(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
@@ -94,20 +96,22 @@ func (a *App) checkDNS(ctx context.Context, d *Domain) DNSCheckResult {
 			}
 		}
 	}
-	ptrMessage := "未找到与邮件主机一致的 PTR；请联系服务器商设置反向 DNS，并确认 A 记录未开启代理"
+	ptrMessage := "未找到与邮件主机一致的 PTR；使用中继时不影响发信，直连发信建议联系服务器商设置反向 DNS，并确认 A 记录未开启代理"
 	if ptrOK {
 		ptrMessage = "PTR 与邮件主机正反向一致"
 	}
 	checks["ptr"] = DNSCheckStatus{OK: ptrOK, Message: ptrMessage, Found: ptrFound}
 
-	status := "ok"
-	for _, c := range checks {
-		if !c.OK {
-			status = "error"
-			break
+	return DNSCheckResult{Domain: d.Name, Status: dnsStatusFromChecks(checks), Checks: checks}
+}
+
+func dnsStatusFromChecks(checks map[string]DNSCheckStatus) string {
+	for _, name := range requiredDNSChecks {
+		if !checks[name].OK {
+			return "error"
 		}
 	}
-	return DNSCheckResult{Domain: d.Name, Status: status, Checks: checks}
+	return "ok"
 }
 
 func checkDKIMRecord(records []string, expectedPublicKey string) DNSCheckStatus {
