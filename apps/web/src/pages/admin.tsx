@@ -3104,49 +3104,49 @@ function CampaignEditorDialog({ open, onOpenChange, mailboxes }: { open: boolean
     }
   }
   return <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) { setBodyExpanded(false); setSendersExpanded(false) } onOpenChange(nextOpen) }}>
-    <DialogContent className="flex h-[96svh] max-h-[96svh] max-w-5xl flex-col overflow-hidden p-0">
-      <DialogHeader className="border-b px-5 py-3"><DialogTitle>新建群发活动</DialogTitle></DialogHeader>
+    <DialogContent className={cn("flex max-h-[88svh] w-[min(94vw,900px)] max-w-none flex-col overflow-hidden p-0", bodyExpanded && "h-[92svh] w-[min(96vw,1040px)]")}>
+      <DialogHeader className="border-b px-4 py-3"><DialogTitle>新建群发活动</DialogTitle></DialogHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="grid gap-5 p-5 lg:h-full lg:min-h-0 lg:grid-cols-2">
-          <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
-            <div className="space-y-4 lg:grid lg:h-32 lg:grid-cols-2 lg:content-start lg:gap-3 lg:space-y-0">
+        <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(280px,0.92fr)]">
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="活动名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：8 月产品通知" />
               <Field label="邮件主题" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="收件人看到的主题" />
             </div>
-            <div className={cn("space-y-2 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:space-y-0", !bodyExpanded && "lg:pb-9")}>
-              <div className="lg:flex lg:h-10 lg:items-start"><Label>邮件正文</Label></div>
+            <div className="space-y-2">
+              <Label>邮件正文</Label>
               <CampaignBodyEditor value={body} expanded={bodyExpanded} onExpandedChange={setBodyExpanded} onChange={setBody} />
             </div>
-            <div className="grid grid-cols-2 gap-3 lg:!mt-auto lg:h-[68px]">
+            <div className="grid grid-cols-2 gap-3">
               <Field label="每分钟发送" type="number" min={1} max={300} value={rate} onChange={(event) => setRate(Math.max(1, Math.min(300, Number(event.target.value) || 1)))} />
               <Field label="定时发送（可选）" required={false} type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />
             </div>
           </div>
 
-          <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
-            <div className="space-y-2 lg:h-32">
+          <div className="space-y-4">
+            <div className="space-y-2">
               <div className="flex items-center justify-between"><Label>发件人</Label><Button type="button" size="sm" variant="ghost" onClick={() => setMailboxIds(mailboxIds.length === mailboxes.length ? [] : mailboxes.map((item) => item.id))}>{mailboxIds.length === mailboxes.length ? "取消全选" : "全选"}</Button></div>
-              <div className={cn("grid grid-cols-1 gap-1 rounded-md border p-2 sm:grid-cols-2", sendersExpanded && "max-h-44 overflow-y-auto")}>{visibleMailboxes.map((mailbox) => <label key={mailbox.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-muted"><Checkbox checked={mailboxIds.includes(mailbox.id)} onCheckedChange={(checked) => toggleMailbox(mailbox.id, checked === true)} /><span className="min-w-0 flex-1 truncate" title={mailbox.address}>{mailbox.address}</span>{mailboxIds.includes(mailbox.id) && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">预计发送 {senderAllocation(mailbox.id)} 封</span>}</label>)}</div>
+              <div className={cn("grid grid-cols-1 gap-1 rounded-md border p-2", sendersExpanded && "max-h-44 overflow-y-auto")}>{visibleMailboxes.map((mailbox) => <label key={mailbox.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-muted"><Checkbox checked={mailboxIds.includes(mailbox.id)} onCheckedChange={(checked) => toggleMailbox(mailbox.id, checked === true)} /><span className="min-w-0 flex-1 truncate" title={mailbox.address}>{mailbox.address}</span>{mailboxIds.includes(mailbox.id) && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">预计发送 {senderAllocation(mailbox.id)} 封</span>}</label>)}</div>
               {mailboxes.length > 4 && <Button type="button" size="sm" variant="ghost" className="h-8 w-full text-xs text-muted-foreground" aria-expanded={sendersExpanded} onClick={() => setSendersExpanded((current) => !current)}><ChevronDown className={cn("mr-1 h-3.5 w-3.5 transition-transform", sendersExpanded && "rotate-180")} />{sendersExpanded ? "收起发件人" : `查看全部发件人 (${mailboxes.length})`}</Button>}
               <div className="text-xs text-muted-foreground">已选 {mailboxIds.length} 位发件人，{parsed.items.length} 位收件人会自动均匀分配；余数按所选顺序每人多发 1 封。</div>
             </div>
-            <div className="space-y-2 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:space-y-0">
-              <div className="flex items-start justify-between gap-2 lg:h-10"><div className="flex flex-col items-start"><Label htmlFor="campaign-recipients">收件人</Label><p className="mt-1 text-xs text-muted-foreground">每行只填写一个邮箱账号，无需姓名。</p></div><div><Input ref={fileRef} className="hidden" type="file" accept=".csv,text/csv" onChange={(event) => { void readCSV(event.target.files?.[0]); event.target.value = "" }} /><Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />导入 CSV</Button></div></div>
-              <Textarea id="campaign-recipients" className="min-h-[180px] resize-y font-mono text-xs lg:min-h-0 lg:flex-1 lg:resize-none" value={recipientText} onChange={(event) => setRecipientText(event.target.value)} placeholder={'zhangsan@example.com\nlisi@example.com'} />
+            <div className="space-y-2">
+              <div className="flex items-start justify-between gap-2"><div className="flex flex-col items-start"><Label htmlFor="campaign-recipients">收件人</Label><p className="mt-1 text-xs text-muted-foreground">每行只填写一个邮箱账号，无需姓名。</p></div><div><Input ref={fileRef} className="hidden" type="file" accept=".csv,text/csv" onChange={(event) => { void readCSV(event.target.files?.[0]); event.target.value = "" }} /><Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />导入 CSV</Button></div></div>
+              <Textarea id="campaign-recipients" className="h-[238px] resize-none font-mono text-xs" value={recipientText} onChange={(event) => setRecipientText(event.target.value)} placeholder={'zhangsan@example.com\nlisi@example.com'} />
               <div className="grid grid-cols-3 gap-2 text-xs"><span className="rounded bg-emerald-500/10 px-2 py-1.5 text-emerald-700">有效 {parsed.items.length}</span><span className="rounded bg-muted px-2 py-1.5 text-muted-foreground">重复 {parsed.duplicates}</span><span className={cn("rounded px-2 py-1.5", parsed.invalid ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>无效 {parsed.invalid}</span></div>
             </div>
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-3 lg:h-[68px] lg:min-h-[68px]"><Checkbox checked={consent} onCheckedChange={(checked) => setConsent(checked === true)} /><span className="text-sm leading-5">确认名单中的收件人已明确同意接收此类邮件，并接受邮件自动附加退订链接。</span></label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-3"><Checkbox checked={consent} onCheckedChange={(checked) => setConsent(checked === true)} /><span className="text-sm leading-5">确认名单中的收件人已明确同意接收此类邮件，并接受邮件自动附加退订链接。</span></label>
           </div>
         </div>
       </div>
-      <DialogFooter className="border-t px-5 py-3"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button><Button type="button" variant="secondary" disabled={!ready || create.isPending} onClick={() => create.mutate({ start: false })}>保存草稿</Button><Button type="button" disabled={!ready || !consent || create.isPending} onClick={() => create.mutate({ start: true })}>{create.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}开始发送</Button></DialogFooter>
+      <DialogFooter className="border-t px-4 py-3"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button><Button type="button" variant="secondary" disabled={!ready || create.isPending} onClick={() => create.mutate({ start: false })}>保存草稿</Button><Button type="button" disabled={!ready || !consent || create.isPending} onClick={() => create.mutate({ start: true })}>{create.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}开始发送</Button></DialogFooter>
     </DialogContent>
   </Dialog>
 }
 
 function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { value: { text: string; html: string }; expanded: boolean; onExpandedChange: (expanded: boolean) => void; onChange: (value: { text: string; html: string }) => void }) {
   const [viewMode, setViewMode] = React.useState<"content" | "preview" | "html">("content")
-  const [insertImage, setInsertImage] = React.useState<CampaignInsertImageState | null>(null)
+  const [insertContent, setInsertContent] = React.useState<CampaignInsertContentState | null>(null)
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false }),
@@ -3170,29 +3170,32 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
     },
   })
 
-  function toggleLink() {
+  function openInsertDialog(kind: CampaignInsertContentState["kind"]) {
     if (!editor) return
-    if (editor.isActive("link")) {
-      editor.chain().focus().unsetLink().run()
+    if (kind === "link") {
+      const attrs = editor.getAttributes("link") as { href?: string }
+      setInsertContent({ kind, selectedText: campaignEditorTextSelection(editor), url: attrs.href || "", editing: Boolean(attrs.href) })
       return
     }
-    const entered = window.prompt("请输入链接地址，例如 https://example.com")?.trim()
-    if (!entered) return
-    const href = /^(https?:|mailto:|tel:|#|\/)/i.test(entered) ? entered : `https://${entered}`
-    editor.chain().focus().extendMarkRange("link").setLink({ href }).run()
-  }
-
-  function openImageDialog() {
-    if (!editor) return
     const attrs = campaignSelectedImageAttributes(editor)
-    setInsertImage({ url: attrs?.src || "", alt: attrs?.alt || "", editing: Boolean(attrs?.src) })
+    setInsertContent({ kind, selectedText: "", url: attrs?.src || "", alt: attrs?.alt || "", editing: Boolean(attrs?.src) })
   }
 
-  function confirmImage(value: { url: string; alt: string }) {
-    if (!editor || !insertImage) return
-    const url = normalizeCampaignImageUrl(value.url)
+  function confirmInsert(value: CampaignInsertContentValue) {
+    if (!editor || !insertContent) return
+    const url = normalizeCampaignInsertUrl(value.url, insertContent.kind)
     if (!url) return
-    if (insertImage.editing) {
+    if (insertContent.kind === "link") {
+      const text = value.text.trim() || insertContent.selectedText || value.url.trim()
+      const linkHtml = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`
+      if ((editor.state.selection.empty && !insertContent.editing) || (value.text.trim() && value.text.trim() !== insertContent.selectedText)) {
+        editor.chain().focus().insertContent(linkHtml).run()
+        return
+      }
+      editor.chain().focus().extendMarkRange("link").setLink({ href: url, target: "_blank", rel: "noopener noreferrer" }).run()
+      return
+    }
+    if (insertContent.editing) {
       editor.chain().focus().updateAttributes("image", { src: url, alt: value.alt.trim() }).run()
       return
     }
@@ -3213,36 +3216,51 @@ function CampaignBodyEditor({ value, expanded, onExpandedChange, onChange }: { v
         ))}
       </div>
       <div className="flex items-center gap-1">
-        <span className="whitespace-nowrap px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">{value.text.replace(/\s/g, "").length} 字</span>
         <Button type="button" size="icon" variant={expanded ? "secondary" : "ghost"} className="h-8 w-8 shrink-0" title={expanded ? "还原群发正文" : "放大群发正文"} aria-label={expanded ? "还原群发正文" : "放大群发正文"} aria-pressed={expanded} onMouseDown={(event) => event.preventDefault()} onClick={() => onExpandedChange(!expanded)}>
           {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </Button>
       </div>
     </div>
-    {viewMode === "content" && <div className="flex min-h-11 flex-wrap items-center gap-0 border-b bg-muted/30 px-2 py-1.5" aria-label="正文格式工具栏">
-      <CampaignToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 /></CampaignToolbarButton>
-      <CampaignToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 /></CampaignToolbarButton>
-      <Separator orientation="vertical" className="mx-0.5 h-6" />
-      <CampaignToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser /></CampaignToolbarButton>
-      <CampaignToolbarButton label="加粗" active={editor?.isActive("bold")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></CampaignToolbarButton>
-      <CampaignToolbarButton label="斜体" active={editor?.isActive("italic")} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></CampaignToolbarButton>
-      <CampaignToolbarButton label="下划线" active={editor?.isActive("underline")} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline /></CampaignToolbarButton>
-      <CampaignToolbarButton label="删除线" active={editor?.isActive("strike")} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough /></CampaignToolbarButton>
-      <CampaignToolbarButton label="链接" active={editor?.isActive("link")} disabled={!editor} onClick={toggleLink}><Link /></CampaignToolbarButton>
-      <CampaignToolbarButton label="图片链接" active={editor?.isActive("image")} disabled={!editor} onClick={openImageDialog}><ImageIcon /></CampaignToolbarButton>
-      <Separator orientation="vertical" className="mx-0.5 h-6" />
-      <CampaignToolbarButton label="无序列表" active={editor?.isActive("bulletList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List /></CampaignToolbarButton>
-      <CampaignToolbarButton label="有序列表" active={editor?.isActive("orderedList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered /></CampaignToolbarButton>
-      <CampaignToolbarButton label="左对齐" active={editor?.isActive({ textAlign: "left" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("left").run()}><AlignLeft /></CampaignToolbarButton>
-      <CampaignToolbarButton label="居中" active={editor?.isActive({ textAlign: "center" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("center").run()}><AlignCenter /></CampaignToolbarButton>
-      <CampaignToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight /></CampaignToolbarButton>
-    </div>}
-    <div className="max-h-[220px] min-h-[160px] overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1 [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6">
+    {viewMode === "content" && <>
+      <div className="flex min-h-10 flex-wrap items-center gap-1 border-b px-2 py-1.5" aria-label="正文插入工具栏">
+        <CampaignToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 /></CampaignToolbarButton>
+        <CampaignToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 /></CampaignToolbarButton>
+        <Separator orientation="vertical" className="mx-1 h-6" />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm" onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
+              <Plus className="h-4 w-4" />插入<ChevronDown className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem className={campaignMenuItemClass} onSelect={() => openInsertDialog("link")}><Link className="h-4 w-4" />链接</DropdownMenuItem>
+            <DropdownMenuItem className={campaignMenuItemClass} onSelect={() => openInsertDialog("image")}><ImageIcon className="h-4 w-4" />图片链接</DropdownMenuItem>
+            <DropdownMenuItem className={campaignMenuItemClass} onSelect={() => editor?.chain().focus().setHorizontalRule().run()}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <span className="ml-auto whitespace-nowrap px-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">{value.text.replace(/\s/g, "").length} 字</span>
+      </div>
+      <div className="flex min-h-10 flex-wrap items-center gap-0 border-b bg-muted/30 px-2 py-1.5" aria-label="正文格式工具栏">
+        <CampaignToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser /></CampaignToolbarButton>
+        <Separator orientation="vertical" className="mx-0.5 h-6" />
+        <CampaignToolbarButton label="加粗" active={editor?.isActive("bold")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold /></CampaignToolbarButton>
+        <CampaignToolbarButton label="斜体" active={editor?.isActive("italic")} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic /></CampaignToolbarButton>
+        <CampaignToolbarButton label="下划线" active={editor?.isActive("underline")} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline /></CampaignToolbarButton>
+        <CampaignToolbarButton label="删除线" active={editor?.isActive("strike")} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough /></CampaignToolbarButton>
+        <Separator orientation="vertical" className="mx-0.5 h-6" />
+        <CampaignToolbarButton label="无序列表" active={editor?.isActive("bulletList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List /></CampaignToolbarButton>
+        <CampaignToolbarButton label="有序列表" active={editor?.isActive("orderedList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered /></CampaignToolbarButton>
+        <CampaignToolbarButton label="左对齐" active={editor?.isActive({ textAlign: "left" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("left").run()}><AlignLeft /></CampaignToolbarButton>
+        <CampaignToolbarButton label="居中" active={editor?.isActive({ textAlign: "center" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("center").run()}><AlignCenter /></CampaignToolbarButton>
+        <CampaignToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight /></CampaignToolbarButton>
+      </div>
+    </>}
+    <div className={cn("h-[238px] overflow-y-auto [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_a]:break-all [&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6", expanded && "h-[calc(92svh-18rem)] min-h-[280px]")}>
       <EditorContent editor={editor} className={cn(viewMode !== "content" && "hidden")} />
       {viewMode === "preview" && <div className="mail-html min-h-full px-3 py-3 text-sm leading-6 [overflow-wrap:anywhere]" aria-label="群发邮件预览" dangerouslySetInnerHTML={{ __html: sanitizeCampaignHtml(value.html || editor?.getHTML() || "") || "<p></p>" }} />}
       {viewMode === "html" && <Textarea className="min-h-full resize-none rounded-none border-0 px-3 py-3 font-mono text-xs leading-5 shadow-none focus-visible:ring-0" aria-label="群发 HTML 源码" value={value.html} onChange={(event) => updateRawHTML(event.target.value)} placeholder="<h1>标题</h1><p>正文</p><img src=&quot;https://example.com/banner.jpg&quot; alt=&quot;&quot;>" />}
     </div>
-    <CampaignInsertImageDialog state={insertImage} onOpenChange={(open) => { if (!open) setInsertImage(null) }} onConfirm={confirmImage} />
+    <CampaignInsertContentDialog state={insertContent} onOpenChange={(open) => { if (!open) setInsertContent(null) }} onConfirm={confirmInsert} />
   </div>
 }
 
@@ -3250,37 +3268,50 @@ function CampaignToolbarButton({ label, active, disabled, onClick, children }: {
   return <Button type="button" size="icon" variant={active ? "secondary" : "ghost"} className="h-8 w-8 shrink-0 [&_svg]:h-4 [&_svg]:w-4" title={label} aria-label={label} aria-pressed={active || undefined} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>{children}</Button>
 }
 
-type CampaignInsertImageState = { url: string; alt: string; editing: boolean }
+const campaignMenuItemClass = "min-h-9 rounded-md px-3 text-sm transition-colors data-[highlighted]:bg-primary/10 data-[highlighted]:font-semibold data-[highlighted]:text-foreground hover:bg-primary/10 hover:font-semibold hover:text-foreground"
 
-function CampaignInsertImageDialog({ state, onOpenChange, onConfirm }: { state: CampaignInsertImageState | null; onOpenChange: (open: boolean) => void; onConfirm: (value: { url: string; alt: string }) => void }) {
+type CampaignInsertContentState = { kind: "link" | "image"; selectedText: string; url?: string; alt?: string; editing?: boolean }
+type CampaignInsertContentValue = { url: string; text: string; alt: string }
+
+function CampaignInsertContentDialog({ state, onOpenChange, onConfirm }: { state: CampaignInsertContentState | null; onOpenChange: (open: boolean) => void; onConfirm: (value: CampaignInsertContentValue) => void }) {
+  const kind = state?.kind || "link"
   const [url, setUrl] = React.useState("")
+  const [text, setText] = React.useState("")
   const [alt, setAlt] = React.useState("")
 
   React.useEffect(() => {
     if (!state) return
-    setUrl(state.url)
-    setAlt(state.alt)
+    setUrl(state.url || "")
+    setText(state.kind === "link" ? state.selectedText : "")
+    setAlt(state.alt || "")
   }, [state])
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!normalizeCampaignImageUrl(url)) return
-    onConfirm({ url, alt })
+    if (!url.trim()) return
+    onConfirm({ url, text, alt })
     onOpenChange(false)
   }
 
   return <Dialog open={!!state} onOpenChange={onOpenChange}>
     <DialogContent className="sm:max-w-md">
       <form className="grid gap-4" onSubmit={submit}>
-        <DialogHeader><DialogTitle>{state?.editing ? "编辑图片" : "插入图片"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{kind === "link" ? (state?.editing ? "编辑链接" : "插入链接") : (state?.editing ? "编辑图片" : "插入图片")}</DialogTitle></DialogHeader>
         <div className="grid gap-2">
-          <Label htmlFor="campaign-image-url">图片地址</Label>
-          <Input id="campaign-image-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/banner.jpg" autoFocus />
+          <Label htmlFor="campaign-insert-url">{kind === "link" ? "链接地址" : "图片地址"}</Label>
+          <Input id="campaign-insert-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder={kind === "link" ? "https://example.com" : "https://example.com/banner.jpg"} autoFocus />
         </div>
-        <div className="grid gap-2">
-          <Label htmlFor="campaign-image-alt">替代文字</Label>
-          <Input id="campaign-image-alt" value={alt} onChange={(event) => setAlt(event.target.value)} placeholder="图片说明" />
-        </div>
+        {kind === "link" ? (
+          <div className="grid gap-2">
+            <Label htmlFor="campaign-insert-text">显示文字</Label>
+            <Input id="campaign-insert-text" value={text} onChange={(event) => setText(event.target.value)} placeholder="默认使用链接地址" />
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            <Label htmlFor="campaign-insert-alt">替代文字</Label>
+            <Input id="campaign-insert-alt" value={alt} onChange={(event) => setAlt(event.target.value)} placeholder="图片说明" />
+          </div>
+        )}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
           <Button type="submit">{state?.editing ? "更新" : "插入"}</Button>
@@ -3290,15 +3321,22 @@ function CampaignInsertImageDialog({ state, onOpenChange, onConfirm }: { state: 
   </Dialog>
 }
 
+function campaignEditorTextSelection(editor: Editor) {
+  const { from, to, empty } = editor.state.selection
+  if (empty) return ""
+  return editor.state.doc.textBetween(from, to, " ").trim()
+}
+
 function campaignSelectedImageAttributes(editor: Editor) {
   const attrs = editor.getAttributes("image") as { src?: string; alt?: string }
   return attrs.src ? attrs : null
 }
 
-function normalizeCampaignImageUrl(value: string) {
+function normalizeCampaignInsertUrl(value: string, kind: CampaignInsertContentState["kind"]) {
   const trimmed = value.trim()
   if (!trimmed) return ""
-  return /^(https?:|cid:|data:image\/|\/)/i.test(trimmed) ? trimmed : `https://${trimmed}`
+  const allowed = kind === "image" ? /^(https?:|cid:|data:image\/|\/)/i : /^(https?:|mailto:|tel:|#|\/)/i
+  return allowed.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
 function sanitizeCampaignHtml(value: string) {
