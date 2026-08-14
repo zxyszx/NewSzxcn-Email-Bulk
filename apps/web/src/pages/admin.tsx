@@ -3300,9 +3300,9 @@ function CampaignBodyEditor({ value, expanded, files, maxAttachmentText, onExpan
             <Paperclip className="h-3.5 w-3.5 shrink-0" />
             <span className="max-w-[220px] truncate" title={file.name}>{file.name}</span>
             <span className="text-muted-foreground">{formatBytes(file.size)}</span>
-            <button type="button" className="ml-1 rounded-sm text-muted-foreground hover:text-foreground" aria-label={`移除附件 ${file.name}`} onClick={() => onRemoveFile(index)}>
+            <Button type="button" variant="ghost" size="icon" className="ml-1 h-5 w-5 rounded-sm p-0 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground" aria-label={`移除附件 ${file.name}`} onClick={() => onRemoveFile(index)}>
               <XCircle className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </Badge>
         ))}
       </div>
